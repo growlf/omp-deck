@@ -1,10 +1,11 @@
 import { Hono } from "hono";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 import type { FilePathMatch, ListFilePathsResponse } from "@omp-deck/protocol";
 
 import { logger } from "./log.ts";
+import { isLoopbackRequest } from "./routes-settings.ts";
 
 const log = logger("fs-complete");
 
@@ -23,6 +24,98 @@ const log = logger("fs-complete");
 export function buildFsRouter(): Hono {
 	const app = new Hono();
 
+/**
+ * `GET /api/fs/browse?path=<absolute>&limit=<>` — lists directory contents
+ * with full paths. Used by the workspace picker to browse the filesystem.
+ */
+	app.get("/fs/browse", async (c) => {
+		if (!isLoopbackRequest(c.req.raw)) return c.json({ error: "browse requires loopback" }, 403);
+	const dirPath = c.req.query("path")?.trim();
+	const limit = clampInt(c.req.query("limit"), 500, 1, 2000);
+
+	if (!dirPath || !path.isAbsolute(dirPath)) {
+		return c.json({ error: "path query param must be an absolute path" }, 400);
+	}
+	if (!isCwdAllowed(dirPath)) {
+		return c.json({ error: "path is not under an allowed root" }, 403);
+	}
+
+	let dirents: import("node:fs").Dirent[];
+	try {
+		dirents = readdirSync(dirPath, { withFileTypes: true });
+	} catch {
+		return c.json({ error: "cannot read directory" }, 400);
+	}
+
+	const entries: { path: string; name: string; isDir: boolean }[] = [];
+	for (const d of dirents) {
+		if (d.name.startsWith(".") && d.name !== "." && d.name !== "..") {
+			if (SKIP_DIRS.has(d.name) || d.name === ".git") continue;
+			if (d.isDirectory()) continue;
+		}
+		if (d.isDirectory() && SKIP_DIRS.has(d.name)) continue;
+
+		entries.push({
+			path: path.join(dirPath, d.name),
+			name: d.name,
+			isDir: d.isDirectory(),
+		});
+		if (entries.length >= limit) break;
+	}
+
+	// Sort: directories first, then alphabetical by name
+	entries.sort((a, b) => {
+		if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+		return a.name.localeCompare(b.name);
+	});
+
+	return c.json({ entries });
+});
+
+/**
+ * `POST /api/fs/mkdir` — creates a directory (including parents).
+ * Used by the workspace picker browse widget to create new folders.
+ */
+app.post("/fs/mkdir", async (c) => {
+		if (!isLoopbackRequest(c.req.raw)) return c.json({ error: "mkdir requires loopback" }, 403);
+	let body: { path: string };
+	try {
+		body = (await c.req.json()) as { path: string };
+	} catch {
+		return c.json({ error: "invalid json body" }, 400);
+	}
+	const targetPath = body.path?.trim();
+	if (!targetPath || !path.isAbsolute(targetPath)) {
+		return c.json({ error: "path must be an absolute path" }, 400);
+	}
+
+	// Create parent dirs if they don't exist, but only if under home.
+	const resolved = path.resolve(targetPath);
+	const parent = path.dirname(resolved);
+	const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+	if (!home) return c.json({ error: "home directory not found" }, 500);
+
+	try {
+		const homeResolved = path.resolve(home);
+		const rel = path.relative(homeResolved, parent);
+		if (rel.startsWith("..") || path.isAbsolute(rel)) {
+			return c.json({ error: "parent path is not under home directory" }, 403);
+		}
+		// Only create if parent doesn't already exist (atomic check).
+		if (!existsSync(parent)) {
+			mkdirSync(parent, { recursive: true });
+		}
+		// Create the target directory itself.
+		if (!existsSync(resolved)) {
+			mkdirSync(resolved);
+		}
+	} catch (err) {
+		return c.json({ error: `mkdir failed: ${String(err)}` }, 400);
+	}
+
+	return c.json({ ok: true });
+});
+
 	app.get("/fs/complete", async (c) => {
 		const cwd = c.req.query("cwd")?.trim();
 		const q = c.req.query("q") ?? "";
@@ -37,6 +130,11 @@ export function buildFsRouter(): Hono {
 		// `C:\Windows`.
 		if (!isCwdAllowed(cwd)) {
 			return c.json({ error: "cwd is not under an allowed root" }, 403);
+		}
+
+		// Lazy TTL eviction: remove expired entries on every access
+		for (const [k, v] of inventoryCache) {
+			if (Date.now() - v.at >= CACHE_TTL_MS) inventoryCache.delete(k);
 		}
 
 		const cached = inventoryCache.get(cwd);

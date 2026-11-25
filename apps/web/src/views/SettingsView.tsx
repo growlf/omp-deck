@@ -1,16 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Play, RotateCcw, Save, Square, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Folder, FolderPlus, Pencil, Pin, PinOff, Plus, Play, RotateCw, RotateCcw, Save, Square, Trash2, X } from "lucide-react";
 import type {
 	BridgeInfo,
 	BridgeName,
 	EnvEntry,
 	GateKnob,
 	ListEnvSettingsResponse,
+	ListWorkspacesResponse,
 	MaintenanceGateState,
 	NotificationLevel,
 	PreludeResponse,
 	StartCommand,
+	WorkspaceEntry,
 } from "@omp-deck/protocol";
 import type { ProviderInfo } from "@omp-deck/protocol";
 
@@ -23,11 +25,12 @@ import { bridgesApi } from "@/lib/bridges-api";
 import { settingsApi } from "@/lib/settings-api";
 import { orientationApi } from "@/lib/orientation-api";
 import { authApi } from "@/lib/auth-api";
+import { api } from "@/lib/api";
 import { playNotificationTone } from "@/lib/audio";
 import { useNotificationPermission } from "@/lib/notifications";
 import { useStore, type NotificationItem } from "@/lib/store";
 import { THEMES, useTheme } from "@/lib/theme";
-import { cn } from "@/lib/utils";
+import { cn, shortPath } from "@/lib/utils";
 
 const SECTIONS = [
 	{ id: "env", label: "Env", description: "Process and deck-managed variables" },
@@ -94,6 +97,8 @@ export function SettingsView() {
 								<AppearanceSection />
 							) : selected === "notifications" ? (
 								<NotificationsSection />
+							) : selected === "workspaces" ? (
+								<WorkspaceSection />
 							) : (
 								<StubSection section={selected} />
 							)}
@@ -1875,5 +1880,918 @@ function ProviderCard({
 				)}
 			</div>
 		</div>
+	);
+}
+
+// ─── Workspace Section ────────────────────────────────────────────────────────
+
+/** Custom label stored per-browser in localStorage */
+function getCustomLabel(cwd: string): string | null {
+	if (typeof window === "undefined") return null;
+	try {
+		return localStorage.getItem(`omp-deck:workspace-label:${cwd}`);
+	} catch {
+		return null;
+	}
+}
+
+function setCustomLabel(cwd: string, label: string): void {
+	if (typeof window === "undefined") return;
+	try {
+		if (label.trim()) {
+			localStorage.setItem(`omp-deck:workspace-label:${cwd}`, label.trim());
+		} else {
+			localStorage.removeItem(`omp-deck:workspace-label:${cwd}`);
+		}
+	} catch {
+		/* quota exceeded — silently ignore */
+	}
+}
+
+/** Split a comma-separated env value into a deduped array */
+function parseWorkspacesValue(value: string | undefined): string[] {
+	if (!value) return [];
+	return value.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+/** Join array back to comma-separated, deduped */
+function toWorkspacesValue(paths: string[]): string {
+	const seen = new Set<string>();
+	const unique: string[] = [];
+	for (const p of paths) {
+		if (!seen.has(p)) {
+			seen.add(p);
+			unique.push(p);
+		}
+	}
+	return unique.join(",");
+}
+
+type WorkspaceType = "default" | "pinned" | "discovered";
+
+function WorkspaceSection() {
+	const [workspaces, setWorkspaces] = useState<WorkspaceEntry[]>([]);
+	const [defaultCwd, setDefaultCwd] = useState<string>("");
+	const [workspacesValue, setWorkspacesValue] = useState<string>("");
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | undefined>();
+	const [saving, setSaving] = useState(false);
+
+	// Modal state
+	const [showAddModal, setShowAddModal] = useState(false);
+	const [showRenameModal, setShowRenameModal] = useState<string | null>(null);
+	const [showRemoveConfirm, setShowRemoveConfirm] = useState<string | null>(null);
+	const [renameLabel, setRenameLabel] = useState<string>("");
+
+	async function refresh(): Promise<void> {
+		try {
+			const [wsResp, envResp] = await Promise.all([
+				api.listWorkspaces(),
+				settingsApi.listEnv(),
+			]);
+			setWorkspaces(wsResp.workspaces);
+			setDefaultCwd(wsResp.defaultCwd);
+			// Find OMP_DECK_WORKSPACES from env
+			const wsEntry = envResp.entries.find((e) => e.key === "OMP_DECK_WORKSPACES");
+			setWorkspacesValue(wsEntry?.masked ?? "");
+			setError(undefined);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setLoading(false);
+		}
+	}
+
+	useEffect(() => {
+		void refresh();
+	}, []);
+
+	function classifyWorkspace(cwd: string): WorkspaceType {
+		if (cwd === defaultCwd) return "default";
+		const pinned = parseWorkspacesValue(workspacesValue);
+		return pinned.includes(cwd) ? "pinned" : "discovered";
+	}
+
+	async function handlePin(cwd: string): Promise<void> {
+		setSaving(true);
+		try {
+			const pinned = parseWorkspacesValue(workspacesValue);
+			if (!pinned.includes(cwd)) {
+				const updated = [...pinned, cwd];
+				const newValue = toWorkspacesValue(updated);
+				await settingsApi.patchEnv({ OMP_DECK_WORKSPACES: newValue });
+				setWorkspacesValue(newValue);
+			}
+			await refresh();
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	async function handleUnpin(cwd: string): Promise<void> {
+		setSaving(true);
+		try {
+			const pinned = parseWorkspacesValue(workspacesValue);
+			const updated = pinned.filter((p) => p !== cwd);
+			const newValue = toWorkspacesValue(updated);
+			await settingsApi.patchEnv({ OMP_DECK_WORKSPACES: newValue || null });
+			setWorkspacesValue(newValue || "");
+			await refresh();
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	async function handleSetDefault(cwd: string): Promise<void> {
+		setSaving(true);
+		try {
+			await settingsApi.patchEnv({ OMP_DECK_DEFAULT_CWD: cwd });
+			await refresh();
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	async function handleAddWorkspace(path: string): Promise<void> {
+		setSaving(true);
+		try {
+			const pinned = parseWorkspacesValue(workspacesValue);
+			if (pinned.includes(path)) {
+				setError("This workspace is already pinned");
+				return;
+			}
+			const updated = [...pinned, path];
+			const newValue = toWorkspacesValue(updated);
+			await settingsApi.patchEnv({ OMP_DECK_WORKSPACES: newValue });
+			setWorkspacesValue(newValue);
+			await refresh();
+			setShowAddModal(false);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	async function handleRemoveWorkspace(cwd: string): Promise<void> {
+		setSaving(true);
+		try {
+			const pinned = parseWorkspacesValue(workspacesValue);
+			const updated = pinned.filter((p) => p !== cwd);
+			const newValue = toWorkspacesValue(updated);
+			await settingsApi.patchEnv({ OMP_DECK_WORKSPACES: newValue || null });
+			setWorkspacesValue(newValue || "");
+			await refresh();
+			setShowRemoveConfirm(null);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	function getDisplayLabel(ws: WorkspaceEntry): string {
+		const custom = getCustomLabel(ws.cwd);
+		return custom ?? ws.label;
+	}
+
+	function updateLabel(cwd: string, newLabel: string): void {
+		setCustomLabel(cwd, newLabel);
+		// Trigger a re-render by forcing state update
+		setWorkspaces((prev) =>
+			prev.map((w) =>
+				w.cwd === cwd ? { ...w, label: newLabel } : w
+			),
+		);
+	}
+
+	const pinned = workspaces.filter((w) => classifyWorkspace(w.cwd) === "pinned");
+	const discovered = workspaces.filter((w) => classifyWorkspace(w.cwd) === "discovered");
+	const defaultWs = workspaces.find((w) => classifyWorkspace(w.cwd) === "default");
+
+	if (loading) {
+		return (
+			<div className="mx-auto max-w-4xl space-y-4">
+				<h1 className="text-xl font-semibold tracking-tight">Workspaces</h1>
+				<div className="text-sm text-ink-3">Loading workspaces...</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="mx-auto max-w-4xl space-y-6">
+			<div className="flex items-center justify-between">
+				<div>
+					<h1 className="text-xl font-semibold tracking-tight">Workspaces</h1>
+					<p className="mt-1 text-sm text-ink-3">
+						Manage pinned roots, default directory, and recent sessions.
+					</p>
+				</div>
+				<Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
+					<Plus className="h-3.5 w-3.5" />
+					Add workspace
+				</Button>
+			</div>
+
+			{error ? (
+				<div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
+					{error}
+				</div>
+			) : null}
+
+			{/* Default workspace */}
+			{defaultWs ? (
+				<WorkspaceSectionCard
+					title="Default workspace"
+					description="Used when creating new sessions"
+				>
+					<WorkspaceCard
+						ws={defaultWs}
+						type="default"
+						displayLabel={getDisplayLabel(defaultWs)}
+						onPin={() => {}}
+						onUnpin={() => {}}
+						onSetDefault={() => void handleSetDefault(defaultWs.cwd)}
+						onRename={() => { setShowRenameModal(defaultWs.cwd); setRenameLabel(getDisplayLabel(defaultWs)); }}
+						onRemove={() => {}}
+						disabledSetDefault={true}
+						disabledRemove={true}
+						saving={saving}
+					/>
+				</WorkspaceSectionCard>
+			) : null}
+
+			{/* Pinned workspaces */}
+			{pinned.length > 0 ? (
+				<WorkspaceSectionCard title="Pinned" description="Persisted in omp-deck configuration">
+					{pinned.map((ws) => (
+						<WorkspaceCard
+							key={ws.cwd}
+							ws={ws}
+							type="pinned"
+							displayLabel={getDisplayLabel(ws)}
+							onPin={() => {}} // already pinned
+							onUnpin={() => void handleUnpin(ws.cwd)}
+							onSetDefault={() => void handleSetDefault(ws.cwd)}
+							onRename={(label) => { setShowRenameModal(ws.cwd); setRenameLabel(label); }}
+							onRemove={() => setShowRemoveConfirm(ws.cwd)}
+							disabledSetDefault={false}
+							disabledRemove={false}
+							saving={saving}
+						/>
+					))}
+				</WorkspaceSectionCard>
+			) : null}
+
+			{/* Discovered workspaces */}
+			{discovered.length > 0 ? (
+				<WorkspaceSectionCard title="Recent" description="Detected from active sessions">
+					{discovered.map((ws) => (
+						<WorkspaceCard
+							key={ws.cwd}
+							ws={ws}
+							type="discovered"
+							displayLabel={getDisplayLabel(ws)}
+							onPin={() => void handlePin(ws.cwd)}
+							onUnpin={() => {}}
+							onSetDefault={() => void handleSetDefault(ws.cwd)}
+							onRename={(label) => updateLabel(ws.cwd, label)}
+							onRemove={() => {}} // can't remove discovered
+							disabledSetDefault={false}
+							disabledRemove={true}
+							saving={saving}
+						/>
+					))}
+				</WorkspaceSectionCard>
+			) : null}
+
+			{/* No workspaces at all */}
+			{workspaces.length === 0 && defaultCwd ? (
+				<div className="rounded-md border border-line bg-paper-2 p-6 text-center">
+					<p className="text-sm text-ink-3">
+						No pinned or discovered workspaces yet. Your default ({shortPath(defaultCwd, 40)}) is used for new sessions.
+					</p>
+					<Button variant="outline" size="sm" className="mt-3" onClick={() => setShowAddModal(true)}>
+						<Plus className="h-3.5 w-3.5" />
+						Add a workspace
+					</Button>
+				</div>
+			) : null}
+
+			{/* Modals */}
+			{showAddModal ? (
+				<AddWorkspaceModal
+					onClose={() => setShowAddModal(false)}
+					onAdd={handleAddWorkspace}
+					existingPaths={parseWorkspacesValue(workspacesValue)}
+				/>
+			) : null}
+
+			{showRenameModal ? (
+				<RenameLabelModal
+					cwd={showRenameModal}
+					currentLabel={renameLabel}
+					onClose={() => setShowRenameModal(null)}
+					onSave={(label) => {
+						updateLabel(showRenameModal, label);
+						setShowRenameModal(null);
+					}}
+				/>
+			) : null}
+
+			{showRemoveConfirm ? (
+				<ConfirmRemoveModal
+					path={showRemoveConfirm}
+					onClose={() => setShowRemoveConfirm(null)}
+					onConfirm={() => void handleRemoveWorkspace(showRemoveConfirm)}
+				/>
+			) : null}
+		</div>
+	);
+}
+
+/** Section card wrapper with header */
+function WorkspaceSectionCard({
+	title,
+	description,
+	children,
+}: {
+	title: string;
+	description: string;
+	children: React.ReactNode;
+}) {
+	return (
+		<div className="rounded-md border border-line bg-paper">
+			<div className="border-b border-line bg-paper-2 px-3 py-2">
+				<div className="flex items-center justify-between">
+					<div>
+						<div className="font-mono text-xs font-medium uppercase tracking-meta">{title}</div>
+						<div className="mt-0.5 text-xs text-ink-3">{description}</div>
+					</div>
+				</div>
+			</div>
+			<div className="divide-y divide-line">
+				{children}
+			</div>
+		</div>
+	);
+}
+
+/** Individual workspace row */
+function WorkspaceCard({
+	ws,
+	type,
+	displayLabel,
+	onPin,
+	onUnpin,
+	onSetDefault,
+	onRename,
+	onRemove,
+	disabledSetDefault,
+	disabledRemove,
+	saving,
+}: {
+	ws: WorkspaceEntry;
+	type: WorkspaceType;
+	displayLabel: string;
+	onPin: () => void;
+	onUnpin: () => void;
+	onSetDefault: () => void;
+	onRename: (label: string) => void;
+	onRemove: () => void;
+	disabledSetDefault: boolean;
+	disabledRemove: boolean;
+	saving: boolean;
+}) {
+	return (
+		<div className="grid grid-cols-[1fr_100px_220px] items-center gap-3 px-3 py-2.5">
+			{/* Workspace name + path */}
+			<div className="min-w-0">
+				<div className="flex items-center gap-1.5">
+					<span className="truncate font-medium text-sm text-ink">{displayLabel}</span>
+					{type === "default" ? (
+						<Badge tone="accent">default</Badge>
+					) : type === "pinned" ? (
+						<Badge tone="success">pinned</Badge>
+					) : (
+						<Badge tone="muted">discovered</Badge>
+					)}
+				</div>
+				<div className="mt-0.5 truncate font-mono text-2xs text-ink-4" title={ws.cwd}>
+					{shortPath(ws.cwd, 80)}
+				</div>
+			</div>
+
+			{/* Session count */}
+			<div className="flex items-center justify-end">
+				<span className="text-xs text-ink-3">{ws.sessionCount} session{ws.sessionCount !== 1 ? "s" : ""}</span>
+			</div>
+
+			{/* Actions */}
+			<div className="flex items-center justify-end gap-1">
+				{type === "discovered" ? (
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={onPin}
+						disabled={saving}
+						title="Pin (persist in config)"
+					>
+						<Pin className="h-3.5 w-3.5" />
+						Pin
+					</Button>
+				) : type === "pinned" ? (
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={onUnpin}
+						disabled={saving}
+						title="Unpin (remove from config)"
+					>
+						<PinOff className="h-3.5 w-3.5" />
+						Unpin
+					</Button>
+				) : null}
+
+				<Button
+					variant="outline"
+					size="sm"
+					onClick={onSetDefault}
+					disabled={disabledSetDefault || saving}
+					title="Set as default"
+				>
+					<RotateCw className="h-3.5 w-3.5" />
+					{disabledSetDefault ? "Default" : "Set default"}
+				</Button>
+
+				<Button
+					variant="ghost"
+					size="sm"
+					onClick={() => onRename("")}
+					title="Rename label"
+				>
+					<Pencil className="h-3.5 w-3.5" />
+				</Button>
+
+				{type === "pinned" ? (
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={onRemove}
+						disabled={disabledRemove || saving}
+						title="Remove"
+						className="text-danger hover:bg-danger/10"
+					>
+						<Trash2 className="h-3.5 w-3.5" />
+					</Button>
+				) : null}
+			</div>
+		</div>
+	);
+}
+
+/** Modal for adding a new workspace with browse + manual input */
+function AddWorkspaceModal({
+	onClose,
+	onAdd,
+	existingPaths,
+}: {
+	onClose: () => void;
+	onAdd: (path: string) => void;
+	existingPaths: string[];
+}) {
+	const [activeTab, setActiveTab] = useState<"browse" | "path">("browse");
+	const [browsePath, setBrowsePath] = useState<string | null>(null);
+	const [browseEntries, setBrowseEntries] = useState<
+		{ path: string; name: string; isDir: boolean }[]
+	>([]);
+	const [loadingBrowse, setLoadingBrowse] = useState(false);
+
+	const [manualPath, setManualPath] = useState("");
+	const [validating, setValidating] = useState(false);
+	const [validated, setValidated] = useState(false);
+	const [error, setError] = useState<string | undefined>();
+	const [creating, setCreating] = useState(false);
+	const [newFolderName, setNewFolderName] = useState("");
+	/** Captures the path being validated so stale async results don't overwrite
+	 * a newer validation's result (e.g. path changed mid-request). */
+	const validationPathRef = useRef<string | null>(null);
+
+	// Always track the latest existingPaths so handleAdd sees current list
+	const existingPathsRef = useRef(existingPaths);
+	existingPathsRef.current = existingPaths;
+
+	useEffect(() => {
+		// Start at home directory
+		const home = typeof window !== "undefined" ? window.location.origin : "";
+		// Default: start from current directory if we have a browser context
+		// Use a sensible default
+		setBrowsePath(null);
+	}, []);
+
+	async function loadBrowse(path: string): Promise<void> {
+		setLoadingBrowse(true);
+		try {
+			const { entries } = await api.browseDir(path);
+			setBrowseEntries(entries);
+			setBrowsePath(path);
+			setError(undefined);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setLoadingBrowse(false);
+		}
+	}
+
+	// Initial load - try to start from home
+	useEffect(() => {
+		// Fetch home dir from server
+		fetch("/api/health")
+			.then((r) => r.json())
+			.then((data) => {
+				if (data.defaultCwd) {
+					loadBrowse(data.defaultCwd);
+				}
+			})
+			.catch(() => {
+				setError("Unable to initialize file browser");
+			});
+	}, []);
+
+	function handleSelectFolder(entry: { path: string; isDir: boolean }): void {
+		if (!entry.isDir) return;
+		loadBrowse(entry.path);
+	}
+
+	function handleUp(): void {
+		if (!browsePath) return;
+		const parent = browsePath.split("/").slice(0, -1).join("/") || "/";
+		if (parent !== browsePath) {
+			loadBrowse(parent);
+		}
+	}
+
+	async function handleCreateFolder(): Promise<void> {
+		if (!newFolderName.trim() || !browsePath) return;
+		const fullPath = browsePath.replace(/\/+$/, "") + "/" + newFolderName.trim();
+		setCreating(true);
+		try {
+			await api.createDir(fullPath);
+			setNewFolderName("");
+			await loadBrowse(browsePath);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setCreating(false);
+		}
+	}
+
+	async function handleValidate(): Promise<void> {
+		const path = manualPath.trim();
+		if (!path) return;
+
+		// Invalidate in-flight validation — only the newest request's result applies
+		const snap = path;
+		validationPathRef.current = path;
+		setValidating(true);
+		try {
+			await api.validatePath(path);
+			// Only apply result if path hasn't changed since request started
+			if (validationPathRef.current === snap) {
+				setValidated(true);
+				setError(undefined);
+			}
+		} catch (e) {
+			if (validationPathRef.current === snap) {
+				setError(String(e));
+				setValidated(false);
+			}
+		} finally {
+			if (validationPathRef.current === snap) {
+				setValidating(false);
+			}
+		}
+	}
+
+	function handleAdd(): void {
+		const candidate =
+			activeTab === "browse" && browsePath
+				? browsePath
+				: activeTab === "path" && manualPath.trim()
+					? manualPath.trim()
+					: null;
+		if (candidate && existingPathsRef.current.includes(candidate)) {
+			setError("This path is already a workspace");
+			return;
+		}
+		if (activeTab === "browse" && browsePath) {
+			onAdd(browsePath);
+		} else if (activeTab === "path" && manualPath.trim() && validated) {
+			onAdd(manualPath.trim());
+		}
+	}
+
+	return (
+		<Modal open onClose={onClose} widthClass="max-w-2xl">
+			<div className="flex h-11 items-center gap-2 border-b border-line px-3">
+				<div className="min-w-0 flex-1">
+					<div className="font-mono text-xs font-semibold text-ink">Add workspace</div>
+					<div className="text-xs text-ink-3">Browse the filesystem or type a path</div>
+				</div>
+				<Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+					<X className="h-4 w-4" />
+				</Button>
+			</div>
+
+			{/* Tabs */}
+			<div className="flex border-b border-line">
+				<button
+					type="button"
+					onClick={() => setActiveTab("browse")}
+					className={`px-4 py-2 text-sm font-medium ${
+						activeTab === "browse"
+							? "border-b-2 border-accent text-accent"
+							: "text-ink-3 hover:text-ink"
+					}`}
+				>
+					Browse
+				</button>
+				<button
+					type="button"
+					onClick={() => setActiveTab("path")}
+					className={`px-4 py-2 text-sm font-medium ${
+						activeTab === "path"
+							? "border-b-2 border-accent text-accent"
+							: "text-ink-3 hover:text-ink"
+					}`}
+				>
+					Type path
+				</button>
+			</div>
+
+			<div className="space-y-3 overflow-auto p-4">
+				{activeTab === "browse" ? (
+					<>
+						{/* Create new folder */}
+						<div className="flex gap-2">
+							<input
+								className="field flex-1 h-8 px-2 font-mono text-xs"
+								type="text"
+								placeholder="New folder name..."
+								value={newFolderName}
+								onChange={(e) => setNewFolderName(e.target.value)}
+							/>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={handleCreateFolder}
+								disabled={creating || !newFolderName.trim()}
+							>
+								<FolderPlus className="h-3.5 w-3.5" />
+								{creating ? "Creating..." : "Create"}
+							</Button>
+						</div>
+
+						{/* Up button */}
+						{browsePath ? (
+							<div className="flex items-center gap-2">
+								<Button
+									variant="ghost"
+									size="sm"
+									onClick={handleUp}
+									disabled={loadingBrowse}
+								>
+									<ChevronUp className="h-3.5 w-3.5" />
+									Up
+								</Button>
+								<span className="font-mono text-2xs text-ink-4 truncate max-w-[300px]" title={browsePath}>
+									{shortPath(browsePath, 40)}
+								</span>
+							</div>
+						) : null}
+
+						{/* Directory listing */}
+						{loadingBrowse ? (
+							<div className="text-sm text-ink-3">Loading...</div>
+						) : (
+							<div className="max-h-64 overflow-auto rounded border border-line">
+								{browseEntries.length === 0 ? (
+									<div className="p-3 text-center text-xs text-ink-3">Empty directory</div>
+								) : (
+									browseEntries.map((entry) => (
+										<button
+											key={entry.path}
+											type="button"
+											onClick={() => handleSelectFolder(entry)}
+											className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+												entry.isDir
+													? "hover:bg-paper-3"
+													: "text-ink-3 cursor-default"
+											}`}
+										>
+											<Folder
+												className={`h-4 w-4 shrink-0 ${
+													entry.isDir ? "text-ink" : "opacity-40"
+												}`}
+											/>
+											<span className="truncate">{entry.name}</span>
+											{entry.isDir ? (
+												<span className="ml-auto text-2xs text-ink-3">Folder</span>
+											) : null}
+										</button>
+									))
+								)}
+							</div>
+						)}
+					</>
+				) : (
+					<>
+						<label className="block">
+							<div className="meta mb-1">Workspace path</div>
+							<input
+								className={`field h-9 w-full px-2 font-mono text-sm ${
+									validated ? "border-success/50" : ""
+								}`}
+								type="text"
+								value={manualPath}
+								onChange={(e) => {
+									setManualPath(e.target.value);
+									setValidated(false);
+								}}
+								placeholder="/home/user/projects/myapp"
+							/>
+						</label>
+						<div className="flex gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={handleValidate}
+								disabled={validating || !manualPath.trim()}
+							>
+								{validating ? "Validating..." : "Validate"}
+							</Button>
+							{validated && (
+								<Badge tone="success">Path exists</Badge>
+							)}
+						</div>
+					</>
+				)}
+
+				{error ? (
+					<div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
+						{error}
+					</div>
+				) : null}
+			</div>
+
+			<div className="flex items-center justify-between gap-2 border-t border-line px-3 py-3">
+				<div className="text-xs text-ink-3">
+					{activeTab === "browse"
+						? browsePath
+							? `Selected: ${shortPath(browsePath, 50)}`
+							: "Select a folder to add"
+						: validated
+						? `${manualPath} — ready to add`
+						: "Validate the path before adding"}
+				</div>
+				<div className="flex gap-2">
+					<Button variant="ghost" size="sm" onClick={onClose}>
+						Cancel
+					</Button>
+					<Button
+						variant="primary"
+						size="sm"
+						onClick={handleAdd}
+						disabled={
+							!(
+								(activeTab === "browse" && browsePath) ||
+								(activeTab === "path" && validated)
+							) || creating
+						}
+					>
+						Add workspace
+					</Button>
+				</div>
+			</div>
+		</Modal>
+	);
+}
+
+/** Modal for renaming a workspace label */
+function RenameLabelModal({
+	cwd,
+	currentLabel,
+	onClose,
+	onSave,
+}: {
+	cwd: string;
+	currentLabel: string;
+	onClose: () => void;
+	onSave: (label: string) => void;
+}) {
+	const [label, setLabel] = useState(currentLabel);
+	const [saving, setSaving] = useState(false);
+
+	return (
+		<Modal open onClose={onClose} widthClass="max-w-md">
+			<div className="flex h-11 items-center gap-2 border-b border-line px-3">
+				<div className="min-w-0 flex-1">
+					<div className="font-mono text-xs font-semibold text-ink">Rename workspace</div>
+					<div className="text-xs text-ink-3">Custom display name for this workspace</div>
+				</div>
+				<Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+					<X className="h-4 w-4" />
+				</Button>
+			</div>
+			<div className="space-y-3 overflow-auto p-4">
+				<label className="block">
+					<div className="meta mb-1">Display name</div>
+					<input
+						className="field h-9 w-full px-2 font-mono text-sm"
+						type="text"
+						value={label}
+						onChange={(e) => setLabel(e.target.value)}
+						placeholder={currentLabel || "Enter custom name"}
+						autoFocus
+					/>
+				</label>
+				<p className="text-xs text-ink-3">
+					Only affects this browser. Falls back to the last path segment.
+				</p>
+			</div>
+			<div className="flex items-center justify-between gap-2 border-t border-line px-3 py-3">
+				<Button variant="ghost" size="sm" onClick={onClose}>
+					Cancel
+				</Button>
+				<Button
+					variant="primary"
+					size="sm"
+					onClick={() => onSave(label)}
+					disabled={saving}
+				>
+					<Save className="h-3.5 w-3.5" />
+					Save
+				</Button>
+			</div>
+		</Modal>
+	);
+}
+
+/** Confirmation modal for removing a workspace */
+function ConfirmRemoveModal({
+	path,
+	onClose,
+	onConfirm,
+}: {
+	path: string;
+	onClose: () => void;
+	onConfirm: () => void;
+}) {
+	const [removing, setRemoving] = useState(false);
+
+	return (
+		<Modal open onClose={onClose} widthClass="max-w-md">
+			<div className="flex h-11 items-center gap-2 border-b border-line px-3">
+				<div className="min-w-0 flex-1">
+					<div className="font-mono text-xs font-semibold text-ink">Remove workspace</div>
+					<div className="text-xs text-ink-3">This action cannot be undone</div>
+				</div>
+				<Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
+					<X className="h-4 w-4" />
+				</Button>
+			</div>
+			<div className="space-y-3 overflow-auto p-4">
+				<p className="text-sm text-ink-2">
+					Are you sure you want to remove this workspace? It will need to be re-added later.
+				</p>
+				<div className="rounded-md border border-line bg-paper-2 px-3 py-2 font-mono text-xs text-ink-3 break-all">
+					{path}
+				</div>
+			</div>
+			<div className="flex items-center justify-between gap-2 border-t border-line px-3 py-3">
+				<Button variant="ghost" size="sm" onClick={onClose}>
+					Cancel
+				</Button>
+				<Button
+					variant="danger"
+					size="sm"
+					onClick={async () => {
+						setRemoving(true);
+						await onConfirm();
+						setRemoving(false);
+					}}
+					disabled={removing}
+				>
+					<Trash2 className="h-3.5 w-3.5" />
+					{removing ? "Removing..." : "Remove"}
+				</Button>
+			</div>
+		</Modal>
 	);
 }

@@ -156,7 +156,11 @@ async function main(): Promise<void> {
 			}
 
 			if (url.pathname === "/" || url.pathname === "/index.html") {
-				return new Response(LANDING_HTML, {
+				// Derive the Vite dev server URL from the request's Host header
+				// so LAN users see the correct address instead of 127.0.0.1.
+				const host = req.headers.get("host") ?? "127.0.0.1";
+				const viteUrl = `http://${host.replace(/:\d+$/, ":5173")}`;
+				return new Response(LANDING_HTML_TEMPLATE(viteUrl), {
 					headers: { "content-type": "text/html; charset=utf-8" },
 				});
 			}
@@ -272,12 +276,12 @@ function scheduleRestart(server: Server<ConnectionData>): RestartServerResponse 
 	return { ok: true, message: "Restart scheduled" };
 }
 
-const LANDING_HTML = `<!doctype html>
+const LANDING_HTML_TEMPLATE = (viteUrl: string) => `<!doctype html>
 <html><head><meta charset="utf-8"><title>omp-deck server</title>
 <style>body{font-family:system-ui;max-width:48em;margin:4em auto;padding:0 1em;color:#e6edf3;background:#0d1117}code{background:#161b22;padding:.1em .4em;border-radius:.3em}a{color:#58a6ff}</style>
 </head><body>
 <h1>omp-deck server</h1>
-<p>Backend is running. The browser UI is served by the <code>@omp-deck/web</code> Vite dev server (typically <a href="http://127.0.0.1:5173">http://127.0.0.1:5173</a> in dev), or the built static assets in production.</p>
+<p>Backend is running. The browser UI is served by the <code>@omp-deck/web</code> Vite dev server: <a href="${viteUrl}">${viteUrl}</a>.</p>
 <p>API base: <code>/api</code> &nbsp;&nbsp; WebSocket: <code>/ws</code></p>
 </body></html>`;
 
