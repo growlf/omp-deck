@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ChevronDown, ChevronUp, Folder, FolderPlus, Pencil, Pin, PinOff, Plus, Play, RotateCw, RotateCcw, Save, Square, Trash2, X } from "lucide-react";
 import type {
@@ -2042,7 +2042,12 @@ function WorkspaceSection() {
 	async function handleRemoveWorkspace(cwd: string): Promise<void> {
 		setSaving(true);
 		try {
-			await handleUnpin(cwd);
+			const pinned = parseWorkspacesValue(workspacesValue);
+			const updated = pinned.filter((p) => p !== cwd);
+			const newValue = toWorkspacesValue(updated);
+			await settingsApi.patchEnv({ OMP_DECK_WORKSPACES: newValue || null });
+			setWorkspacesValue(newValue || "");
+			await refresh();
 			setShowRemoveConfirm(null);
 		} catch (e) {
 			setError(String(e));
@@ -2374,6 +2379,13 @@ function AddWorkspaceModal({
 	const [error, setError] = useState<string | undefined>();
 	const [creating, setCreating] = useState(false);
 	const [newFolderName, setNewFolderName] = useState("");
+	/** Captures the path being validated so stale async results don't overwrite
+	 * a newer validation's result (e.g. path changed mid-request). */
+	const validationPathRef = useRef<string | null>(null);
+
+	// Always track the latest existingPaths so handleAdd sees current list
+	const existingPathsRef = useRef(existingPaths);
+	existingPathsRef.current = existingPaths;
 
 	useEffect(() => {
 		// Start at home directory
@@ -2441,21 +2453,43 @@ function AddWorkspaceModal({
 	}
 
 	async function handleValidate(): Promise<void> {
-		if (!manualPath.trim()) return;
+		const path = manualPath.trim();
+		if (!path) return;
+
+		// Invalidate in-flight validation — only the newest request's result applies
+		const snap = path;
+		validationPathRef.current = path;
 		setValidating(true);
 		try {
-			await api.validatePath(manualPath.trim());
-			setValidated(true);
-			setError(undefined);
+			await api.validatePath(path);
+			// Only apply result if path hasn't changed since request started
+			if (validationPathRef.current === snap) {
+				setValidated(true);
+				setError(undefined);
+			}
 		} catch (e) {
-			setError(String(e));
-			setValidated(false);
+			if (validationPathRef.current === snap) {
+				setError(String(e));
+				setValidated(false);
+			}
 		} finally {
-			setValidating(false);
+			if (validationPathRef.current === snap) {
+				setValidating(false);
+			}
 		}
 	}
 
 	function handleAdd(): void {
+		const candidate =
+			activeTab === "browse" && browsePath
+				? browsePath
+				: activeTab === "path" && manualPath.trim()
+					? manualPath.trim()
+					: null;
+		if (candidate && existingPathsRef.current.includes(candidate)) {
+			setError("This path is already a workspace");
+			return;
+		}
 		if (activeTab === "browse" && browsePath) {
 			onAdd(browsePath);
 		} else if (activeTab === "path" && manualPath.trim() && validated) {

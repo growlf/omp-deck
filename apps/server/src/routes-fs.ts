@@ -5,6 +5,7 @@ import * as path from "node:path";
 import type { FilePathMatch, ListFilePathsResponse } from "@omp-deck/protocol";
 
 import { logger } from "./log.ts";
+import { isLoopbackRequest } from "./routes-settings.ts";
 
 const log = logger("fs-complete");
 
@@ -28,6 +29,7 @@ export function buildFsRouter(): Hono {
  * with full paths. Used by the workspace picker to browse the filesystem.
  */
 	app.get("/fs/browse", async (c) => {
+		if (!isLoopbackRequest(c.req.raw)) return c.json({ error: "browse requires loopback" }, 403);
 	const dirPath = c.req.query("path")?.trim();
 	const limit = clampInt(c.req.query("limit"), 500, 1, 2000);
 
@@ -75,6 +77,7 @@ export function buildFsRouter(): Hono {
  * Used by the workspace picker browse widget to create new folders.
  */
 app.post("/fs/mkdir", async (c) => {
+		if (!isLoopbackRequest(c.req.raw)) return c.json({ error: "mkdir requires loopback" }, 403);
 	let body: { path: string };
 	try {
 		body = (await c.req.json()) as { path: string };
@@ -127,6 +130,11 @@ app.post("/fs/mkdir", async (c) => {
 		// `C:\Windows`.
 		if (!isCwdAllowed(cwd)) {
 			return c.json({ error: "cwd is not under an allowed root" }, 403);
+		}
+
+		// Lazy TTL eviction: remove expired entries on every access
+		for (const [k, v] of inventoryCache) {
+			if (Date.now() - v.at >= CACHE_TTL_MS) inventoryCache.delete(k);
 		}
 
 		const cached = inventoryCache.get(cwd);
