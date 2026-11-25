@@ -1,82 +1,83 @@
 {
-	"name": "omp-deck",
-	"version": "0.6.1",
-	"private": false,
-	"description": "Cockpit web UI for the omp (oh-my-pi) coding agent — multi-session chat, kanban, cron routines, inbox, messaging bridges, and a marketplace browser. Designed to be served loopback-only behind a Tailscale gate or SSH tunnel.",
-	"keywords": [
-		"omp",
-		"oh-my-pi",
-		"coding-agent",
-		"ai",
-		"llm",
-		"bun",
-		"react",
-		"tailwind",
-		"self-hosted",
-		"kanban",
-		"tailscale"
-	],
-	"homepage": "https://github.com/bjb2/omp-deck#readme",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/bjb2/omp-deck.git"
-	},
-	"bugs": {
-		"url": "https://github.com/bjb2/omp-deck/issues"
-	},
-	"author": "Bryan Bartley",
-	"license": "MIT",
-	"type": "module",
-	"workspaces": [
-		"apps/*",
-		"apps/bridges/*",
-		"packages/*"
-	],
-	"scripts": {
-		"dev": "bun run --filter '@omp-deck/server' --filter '@omp-deck/web' dev",
-		"dev:server": "bun run --filter '@omp-deck/server' dev",
-		"dev:web": "bun run --filter '@omp-deck/web' dev",
-		"dev:telegram": "bun run --filter '@omp-deck/telegram-bridge' dev",
-		"build": "bun run --filter '@omp-deck/web' build && bun run --filter '@omp-deck/server' build",
-		"start": "bun run --filter '@omp-deck/server' start",
-		"typecheck": "bun run --filter='@omp-deck/*' typecheck",
-		"clean": "rm -rf apps/*/dist apps/*/node_modules apps/bridges/*/node_modules packages/*/node_modules node_modules",
-		"prepack": "node scripts/prepack.mjs",
-		"postpack": "node scripts/postpack.mjs"
-	},
-	"bin": {
-		"omp-deck": "./bin/omp-deck.mjs"
-	},
-	"files": [
-		"bin",
-		"apps/server/src",
-		"apps/server/package.json",
-		"apps/web/dist",
-		"starter-skills",
-		"starter-extensions",
-		"README.md",
-		"LICENSE",
-		"CHANGELOG.md"
-	],
-	"engines": {
-		"bun": ">=1.3.14",
-		"node": ">=18"
-	},
-	"dependencies": {
-		"@oh-my-pi/pi-ai": "15.1.7",
-		"@oh-my-pi/pi-coding-agent": "15.1.7",
-		"@omp-deck/protocol": "0.6.1",
-		"ajv": "^8.17.1",
-		"ajv-formats": "^3.0.1",
-		"croner": "^10.0.1",
-		"hono": "^4.6.14",
-		"quickjs-emscripten": "^0.31.0",
-		"yaml": "^2.9.0"
-	},
-	"bundledDependencies": [
-		"@omp-deck/protocol"
-	],
-	"devDependencies": {
-		"typescript": "^5.6.3"
-	}
+  "name": "omp-deck",
+  "version": "0.6.1",
+  "private": false,
+  "description": "Cockpit web UI for the omp (oh-my-pi) coding agent — multi-session chat, kanban, cron routines, inbox, messaging bridges, and a marketplace browser. Designed to be served loopback-only behind a Tailscale gate or SSH tunnel.",
+  "keywords": [
+    "omp",
+    "oh-my-pi",
+    "coding-agent",
+    "ai",
+    "llm",
+    "bun",
+    "react",
+    "tailwind",
+    "self-hosted",
+    "kanban",
+    "tailscale"
+  ],
+  "homepage": "https://github.com/bjb2/omp-deck#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bjb2/omp-deck.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bjb2/omp-deck/issues"
+  },
+  "author": "Bryan Bartley",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "apps/bridges/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --filter '@omp-deck/server' --filter '@omp-deck/web' dev",
+    "dev:server": "bun run --filter '@omp-deck/server' dev",
+    "dev:web": "bun run --filter '@omp-deck/web' dev",
+    "dev:telegram": "bun run --filter '@omp-deck/telegram-bridge' dev",
+    "desktop:dev": "./scripts/detect-server-port.sh | xargs -I{} sh -c 'export OMP_DECK_PORT=\"{}\"; bun run --filter \"@omp-deck/desktop\" tauri:dev'",
+    "desktop:build": "bun run --filter '@omp-deck/desktop' tauri:build",
+    "start": "bun run --filter '@omp-deck/server' start",
+    "typecheck": "bun run --filter='@omp-deck/*' typecheck",
+    "clean": "rm -rf apps/*/dist apps/*/node_modules apps/bridges/*/node_modules packages/*/node_modules node_modules",
+    "prepack": "node scripts/prepack.mjs",
+    "postpack": "node scripts/postpack.mjs"
+  },
+  "bin": {
+    "omp-deck": "./bin/omp-deck.mjs"
+  },
+  "files": [
+    "bin",
+    "apps/server/src",
+    "apps/server/package.json",
+    "apps/web/dist",
+    "starter-skills",
+    "starter-extensions",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "bun": ">=1.3.14",
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@oh-my-pi/pi-ai": "15.1.7",
+    "@oh-my-pi/pi-coding-agent": "15.1.7",
+    "@omp-deck/protocol": "0.6.1",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "croner": "^10.0.1",
+    "hono": "^4.6.14",
+    "quickjs-emscripten": "^0.31.0",
+    "yaml": "^2.9.0"
+  },
+  "bundledDependencies": [
+    "@omp-deck/protocol"
+  ],
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
 }

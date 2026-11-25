@@ -84,4 +84,19 @@ export const api = {
 		const params = new URLSearchParams({ cwd, q, limit: String(limit) });
 		return request<ListFilePathsResponse>(`/fs/complete?${params.toString()}`);
 	},
+	browseDir(path: string, limit = 500): Promise<{ entries: { path: string; name: string; isDir: boolean }[] }> {
+		const params = new URLSearchParams({ path, limit: String(limit) });
+		return request<{ entries: { path: string; name: string; isDir: boolean }[] }>(`/fs/browse?${params.toString()}`);
+	},
+	createDir(path: string): Promise<{ ok: true }> {
+		return request("/fs/mkdir", {
+			method: "POST",
+			body: JSON.stringify({ path }),
+		});
+	},
+	validatePath(path: string): Promise<{ ok: true }> {
+		// Reuse browseDir — if it succeeds (even with 0 entries), the dir exists.
+		// If it fails with "cannot read directory", the path doesn't exist.
+		return this.browseDir(path, 1).then(() => ({ ok: true }));
+	},
 };
