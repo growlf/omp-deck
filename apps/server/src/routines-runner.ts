@@ -26,6 +26,7 @@ import { ConcurrencyController } from "./routines/concurrency.ts";
 import { runV1Pipeline } from "./routines/v1-runner.ts";
 import { finalizeRun, insertAbortedRun } from "./db/routine-step-runs.ts";
 import { loadConfig } from "./config.ts";
+import { expandCwdPath, routineSpawnEnv } from "./routines/types.ts";
 
 const log = logger("routines-runner");
 
@@ -250,12 +251,17 @@ async function runV0Action(
 	if (!cmd) {
 		return { error: `unsupported action kind: ${kind}`, stdoutExcerpt: "", stderrExcerpt: "" };
 	}
+	const expandedCwd = expandCwdPath(cwd);
+	const env = routineSpawnEnv();
+	console.error(`[runV0] kind=${kind} cmd=[${cmd.join(", ")}] cwd=${expandedCwd}`);
+	console.error(`[runV0] env.PATH=${env.PATH}`);
 	const proc = Bun.spawn(cmd, {
-		cwd,
+		cwd: expandedCwd,
 		stdin: "ignore",
 		stdout: "pipe",
 		stderr: "pipe",
 		windowsHide: true,
+		env,
 	});
 	const timer = setTimeout(() => {
 		try { proc.kill(); } catch { /* already gone */ }

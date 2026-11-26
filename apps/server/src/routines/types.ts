@@ -94,3 +94,20 @@ export type StepExecutor = (
 	context: RunContext,
 	signal: AbortSignal,
 ) => Promise<StepResult>;
+
+/** Enriched env for subprocesses: adds ~/.local/bin and ~/bin to PATH so
+ * user-installed CLIs (like `omp`) are discoverable. */
+export function routineSpawnEnv(): NodeJS.ProcessEnv {
+	const home = process.env.HOME ?? "/root";
+	const extra = `${home}/.local/bin:${home}/bin`;
+	const existing = process.env.PATH ?? "";
+	const newEnv = { ...process.env, PATH: `${extra}:${existing}` };
+	console.error(`[routineSpawnEnv] HOME=${home}, extra=${extra}, PATH length=${newEnv.PATH?.length ?? 0}`);
+	return newEnv;
+}
+/** Expand a leading `~` in a path to `$HOME`. Bun.spawn does not expand
+`~` in the cwd field — it will ENOENT on an unexpanded tilde. */
+export function expandCwdPath(p: string): string {
+	const home = process.env.HOME ?? "/root";
+	return p.startsWith("~/") ? `${home}/${p.slice(2)}` : p;
+}

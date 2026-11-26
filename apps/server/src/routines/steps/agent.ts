@@ -17,6 +17,7 @@ import type { RoutineStep } from "@omp-deck/protocol";
 import { costMicros } from "../budget.ts";
 import { renderString } from "../template.ts";
 import type { RunContext, StepResult } from "../types.ts";
+import { expandCwdPath, routineSpawnEnv } from "../types.ts";
 import { validateRoutineSpec as _vrs } from "@omp-deck/protocol";
 
 void _vrs; // keep import; unused but ensures protocol re-export typechecks here
@@ -49,11 +50,12 @@ export async function executeAgentStep(
 
 	try {
 		const proc = Bun.spawn(["omp", ...args], {
-			cwd: defaultCwd,
+			cwd: expandCwdPath(defaultCwd),
 			stdin: "ignore",
 			stdout: "pipe",
 			stderr: "pipe",
 			windowsHide: true,
+			env: routineSpawnEnv(),
 		});
 		const onAbort = () => {
 			try {
