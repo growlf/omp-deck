@@ -22,15 +22,22 @@ import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-c
 import type {
 	AgentMessageJson,
 	AgentSessionEventJson,
+	ContextUsage,
 	ExtUiDialogResponse,
+	ImageAttachment,
 	ModelInfo,
 	ModelRef,
 	PendingPlanApprovalWire,
 	PlanModeContextWire,
+	QueuedPromptWire,
 	ServerFrame,
 	SessionSnapshot,
 	SessionSummary,
 } from "@omp-deck/protocol";
+
+import path from "node:path";
+import { statSync } from "node:fs";
+import { isRecentlyModified, readJsonlEntries, readJsonlHeader, tailJsonl } from "../jsonl-tailer.ts";
 
 import { logger } from "../log.ts";
 import { getDeckModelRegistry } from "../auth-singleton.ts";
@@ -62,19 +69,20 @@ const log = logger("bridge:in-process");
  */
 
 interface Active {
-	handle: InProcessSessionHandle;
-	session: AgentSession;
-	unsubscribe: () => void;
+	handle: SessionHandle;
+	/** SDK session, present iff deck-owned (in-process); absent for tailer-backed external sessions. */
+	session?: AgentSession;
+	unsubscribe?: () => void;
 	/** Wall-clock ms of the last user-visible activity on this session. */
 	lastActivityAt: number;
 	/** True between turn_start and turn_end — never reap mid-turn. */
 	turnInFlight: boolean;
 	/** Set of WS connection ids currently subscribed. Reaping requires zero subscribers. */
 	subscribers: Set<string>;
-	/** Per-session bridge from SDK `ExtensionUIContext` calls to deck WS frames. */
-	uiBridge: ExtensionUIBridge;
-	/** Per-session bridge for the SDK plan-mode lifecycle. */
-	planBridge: PlanModeBridge;
+	/** Per-session bridge from SDK `ExtensionUIContext` calls to deck WS frames; absent for tailer-backed sessions. */
+	uiBridge?: ExtensionUIBridge;
+	/** Per-session bridge for the SDK plan-mode lifecycle; absent for tailer-backed sessions. */
+	planBridge?: PlanModeBridge;
 }
 
 export class InProcessAgentBridge implements AgentBridge {
@@ -146,6 +154,42 @@ export class InProcessAgentBridge implements AgentBridge {
 	}
 
 	async resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle> {
+		const filePath = opts.sessionPath;
+		const header = readJsonlHeader(filePath);
+		if (!header) {
+			throw new Error(`cannot resume session from unreadable file: ${filePath}`);
+		}
+		const sessionId = header.id ?? path.basename(filePath, ".jsonl");
+		const existing = this.active.get(sessionId);
+		if (existing?.handle.isResumed) {
+			if (opts.external === true) return existing.handle; // already live-tailed — no-op resume
+			throw new Error(`session ${sessionId} is already tailed as an external read-only session — stop the external process or resume with external: true`);
+		}
+		if (existing) await existing.handle.dispose();
+		if (opts.external !== true && isRecentlyModified(filePath)) {
+			throw new Error(
+				`session file was modified within the last 2 minutes — it may be owned by an external process; resume with external: true (read-only)`,
+			);
+		}
+		if (opts.external === true) {
+			const cwd = header.cwd ?? process.cwd();
+			const handle = new TailerSessionHandle({
+				sessionPath: filePath,
+				sessionId,
+				cwd,
+				onDispose: () => {
+					this.active.delete(sessionId);
+				},
+			});
+			this.active.set(sessionId, {
+				handle,
+				lastActivityAt: Date.now(),
+				turnInFlight: false,
+				subscribers: new Set(),
+			});
+			log.info(`resumed external session ${sessionId} from ${filePath} (read-only tail)`);
+			return handle;
+		}
 		const sessionManager = await SessionManager.open(opts.sessionPath);
 		const cwd = (sessionManager.getCwd?.() as string | undefined) ?? process.cwd();
 		const modelRegistry = await this.ensureModelRegistry();
@@ -174,7 +218,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		const raw = opts.cwd
 			? await SessionManager.list(opts.cwd)
 			: await SessionManager.listAll();
-		return raw.map((r: any) => summarize(r));
+		return raw.map((r) => summarize(r));
 	}
 
 	private ensureModelRegistry(): Promise<ModelRegistry> {
@@ -500,7 +544,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		) => void,
 	): () => void {
 		const entry = this.active.get(sessionId);
-		if (!entry) return () => {};
+		if (!entry || !entry.uiBridge) return () => {};
 		// Replay any already-open dialogs to the late subscriber so a page
 		// reload doesn't strand the user with an invisible blocking modal.
 		for (const frame of entry.uiBridge.getPendingFrames()) {
@@ -515,7 +559,7 @@ export class InProcessAgentBridge implements AgentBridge {
 
 	respondToUiDialog(sessionId: string, dialogId: string, response: ExtUiDialogResponse): void {
 		const entry = this.active.get(sessionId);
-		if (!entry) return;
+		if (!entry || !entry.uiBridge) return;
 		entry.uiBridge.handleResponse(dialogId, response);
 	}
 
@@ -531,7 +575,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		) => void,
 	): () => void {
 		const entry = this.active.get(sessionId);
-		if (!entry) return () => {};
+		if (!entry || !entry.planBridge) return () => {};
 		// Replay current plan-mode state + any pending approval to the late
 		// subscriber so a reconnect mid-approval re-renders the card instead
 		// of waiting for the next event.
@@ -551,7 +595,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		response: PlanApprovalResponse,
 	): Promise<"settled" | "unknown"> {
 		const entry = this.active.get(sessionId);
-		if (!entry) return "unknown";
+		if (!entry || !entry.planBridge) return "unknown";
 		this.bumpActivity(sessionId);
 		return entry.planBridge.respond(proposalId, response);
 	}
@@ -600,6 +644,7 @@ export class InProcessAgentBridge implements AgentBridge {
 export class InProcessSessionHandle implements SessionHandle {
 	readonly sessionId: string;
 	readonly cwd: string;
+	readonly isResumed = false;
 	private session: AgentSession;
 	private readonly sessionManager: SessionManager;
 	private readonly modelRegistryRef: () => Promise<ModelRegistry>;
@@ -714,7 +759,12 @@ export class InProcessSessionHandle implements SessionHandle {
 		const snap: SessionSnapshot = {
 			sessionId: this.sessionId,
 			sessionFile: this.sessionFile,
-			sessionName: typeof s.sessionName === "string" ? s.sessionName : undefined,
+			sessionName:
+				typeof s.sessionName === "string" && s.sessionName.trim().length > 0
+					? s.sessionName
+					: this.sessionFile
+						? readJsonlHeader(this.sessionFile)?.title
+						: undefined,
 			cwd: this.cwd,
 			model:
 				s.model && typeof s.model === "object"
@@ -1126,6 +1176,10 @@ export class InProcessSessionHandle implements SessionHandle {
 		return this.planBridge.respond(proposalId, response);
 	}
 
+	emitSessionUpdated(): void {
+		this.emit({ type: "session_updated", snapshot: this.snapshot() } as unknown as AgentSessionEventJson);
+	}
+
 	async dispose(): Promise<void> {
 		if (this.disposed) return;
 		this.disposed = true;
@@ -1139,6 +1193,250 @@ export class InProcessSessionHandle implements SessionHandle {
 	}
 }
 
+const READ_ONLY_ERROR = "session owned by an external omp process — read-only";
+
+/**
+ * Map one raw JSONL message entry (the inner `message` object) into an
+ * `AgentMessageJson`. Any extra fields on the entry are preserved verbatim —
+ * the web reducer is deliberately tolerant of extra keys.
+ */
+function normalizeTailMessage(
+	message: Record<string, unknown>,
+	timestamp?: string,
+): AgentMessageJson {
+	const content = Array.isArray(message.content) ? message.content : [];
+	return {
+		role: String(message.role ?? "user"),
+		timestamp:
+			timestamp ??
+			(typeof message.timestamp === "string" ? message.timestamp : undefined),
+		content,
+	} as AgentMessageJson;
+}
+
+/**
+ * Read-only session handle for a file-backed session owned by an external
+ * omp process. Polls the JSONL file (with dedupe + inode/size tracking) and
+ * re-emits each new entry as a best-effort frame; every mutating method
+ * throws with an "external session — read-only" error so the WS layer /
+ * HTTP routes can surface a clear refusal instead of racing the file writer.
+ */
+class TailerSessionHandle implements SessionHandle {
+	readonly sessionId: string;
+	readonly isResumed = true;
+	readonly sessionFile: string;
+	readonly cwd: string;
+
+	private listeners = new Set<EventListener>();
+	private teardownTail: (() => void) | null = null;
+	private disposed = false;
+	private readonly onDisposeCallback: () => void;
+
+	constructor(args: {
+		sessionPath: string;
+		sessionId: string;
+		cwd: string;
+		onDispose?: () => void;
+	}) {
+		this.sessionFile = args.sessionPath;
+		this.sessionId = args.sessionId;
+		this.cwd = args.cwd;
+		this.onDisposeCallback = args.onDispose ?? (() => {});
+	}
+
+	subscribe(listener: EventListener): () => void {
+		if (this.disposed) return () => {};
+		this.listeners.add(listener);
+		this.startTail();
+		return () => {
+			this.listeners.delete(listener);
+			if (this.listeners.size === 0 && this.teardownTail) {
+				this.teardownTail();
+				this.teardownTail = null;
+			}
+		};
+	}
+
+	private startTail(): void {
+		if (this.teardownTail || this.disposed) return;
+		this.teardownTail = tailJsonl(this.sessionFile, {
+			onEvent: (event) => {
+				try {
+					if (this.disposed) return;
+					if (event.type === "message") {
+						const entry = event.raw;
+						const message = entry.message;
+						if (
+							message &&
+							typeof message === "object" &&
+							!Array.isArray(message)
+						) {
+							const normalized = normalizeTailMessage(
+								message as Record<string, unknown>,
+								typeof entry.timestamp === "string" ? entry.timestamp : undefined,
+							);
+							this.emit({
+								type: "message_start",
+								message: normalized,
+							} as AgentSessionEventJson);
+							if (normalized.role === "assistant") {
+								this.emit({
+									type: "message_end",
+									message: normalized,
+								} as AgentSessionEventJson);
+							}
+						}
+					} else if (event.type !== "unknown") {
+						// session header / model_change / thinking_level_change /
+						// compaction / … — emit a refreshed snapshot so clients
+						// see title/model/cwd changes without re-subscribing.
+						this.emit({
+							type: "session_updated",
+							snapshot: this.snapshot(),
+						} as AgentSessionEventJson);
+					}
+				} catch (err) {
+					log.warn("tail listener threw", err);
+				}
+			},
+			onError: (err) => {
+				log.warn("tail error", err);
+			},
+		});
+	}
+
+	private emit(event: AgentSessionEventJson): void {
+		for (const listener of this.listeners) {
+			try {
+				listener(event);
+			} catch (err) {
+				log.warn("tailer subscriber threw", err);
+			}
+		}
+	}
+
+	snapshot(): SessionSnapshot {
+		const header = readJsonlHeader(this.sessionFile);
+		const entries = readJsonlEntries(this.sessionFile);
+		const messages: AgentMessageJson[] = [];
+		for (const entry of entries) {
+			if (entry.type !== "message") continue;
+			const message = entry.message;
+			if (!message || typeof message !== "object" || Array.isArray(message)) continue;
+			const m = message as Record<string, unknown>;
+			const timestamp =
+				typeof entry.timestamp === "string"
+					? entry.timestamp
+					: typeof m.timestamp === "string"
+						? m.timestamp
+						: undefined;
+			messages.push(normalizeTailMessage(m, timestamp));
+		}
+		return {
+			sessionId: this.sessionId,
+			sessionFile: this.sessionFile,
+			sessionName: header?.title,
+			cwd: header?.cwd ?? this.cwd,
+			isStreaming: false,
+			messages,
+			todoPhases: [],
+			external: true,
+		};
+	}
+
+	async prompt(): Promise<void> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	async abort(): Promise<void> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	async setName(_name: string): Promise<void> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	async compact(): Promise<void> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	async setModel(): Promise<void> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	async dispatchSlashCommand(): Promise<SlashDispatchResult> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	async dispatchDeckSlashCommand(): Promise<SlashDispatchResult> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	async setPlanMode(): Promise<void> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	clearQueue(): { steering: number; followUp: number } {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	async cancelQueuedById(): Promise<boolean> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	async editQueuedById(): Promise<boolean> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+	async respondToPlanApproval(): Promise<"settled" | "unknown"> {
+		throw new Error(READ_ONLY_ERROR);
+	}
+
+	emitSessionUpdated(): void {
+		this.emit({ type: "session_updated", snapshot: this.snapshot() } as unknown as AgentSessionEventJson);
+	}
+
+	isStreamingNow(): boolean {
+		return false;
+	}
+	queuedMessageCount(): number {
+		return 0;
+	}
+	getQueueSnapshot(): QueuedPromptWire[] {
+		return [];
+	}
+	getContextUsage(): ContextUsage | undefined {
+		return undefined;
+	}
+	getPlanModeContext(): PlanModeContextWire | undefined {
+		return undefined;
+	}
+	getPendingPlanApproval(): PendingPlanApprovalWire | undefined {
+		return undefined;
+	}
+
+	async dispose(): Promise<void> {
+		if (this.disposed) return;
+		this.disposed = true;
+		this.listeners.clear();
+		if (this.teardownTail) {
+			this.teardownTail();
+			this.teardownTail = null;
+		}
+		this.onDisposeCallback();
+	}
+}
+
+
+// Memoized JSONL-header read per filePath+mtimeMs — avoids one file read per
+// session per list call. Capped; whole map is dropped when exceeded.
+const headerCache = new Map<string, { mtimeMs: number; title: string | undefined }>();
+const HEADER_CACHE_MAX = 64;
+
+function cachedHeaderTitle(filePath: string): string | undefined {
+	let mtimeMs: number | undefined;
+	try {
+		mtimeMs = statSync(filePath).mtimeMs;
+	} catch {
+		return readJsonlHeader(filePath)?.title;
+	}
+	const cached = headerCache.get(filePath);
+	if (cached && cached.mtimeMs === mtimeMs) return cached.title;
+	const title = readJsonlHeader(filePath)?.title;
+	if (headerCache.size >= HEADER_CACHE_MAX) headerCache.clear();
+	headerCache.set(filePath, { mtimeMs, title });
+	return title;
+}
+
 /** Normalize a SessionManager.list / listAll record into our SessionSummary. */
 function summarize(raw: any): SessionSummary {
 	// omp's list returns objects like:
@@ -1146,12 +1444,13 @@ function summarize(raw: any): SessionSummary {
 	const id = String(raw.id ?? raw.sessionId ?? raw.header?.id ?? "");
 	const filePath = String(raw.path ?? raw.file ?? raw.sessionFile ?? "");
 	const cwd = String(raw.cwd ?? raw.header?.cwd ?? "");
-	const title =
+	const rawTitle =
 		typeof raw.title === "string"
 			? raw.title
 			: typeof raw.header?.title === "string"
 				? raw.header.title
 				: undefined;
+	const title = rawTitle ?? (filePath ? cachedHeaderTitle(filePath) : undefined);
 	const createdAt = String(raw.timestamp ?? raw.createdAt ?? raw.header?.timestamp ?? "");
 	const updatedAt = String(raw.modifiedAt ?? raw.updatedAt ?? createdAt);
 	const messageCount = Number(raw.messageCount ?? raw.count ?? 0);

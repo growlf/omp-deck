@@ -8,6 +8,11 @@ import { resolveBunExecutable } from "./runtime-bun.ts";
 
 const log = logger("bridges");
 
+const MAX_RESTARTS = 5;
+const BASE_DELAY_MS = 1000;
+const MAX_DELAY_MS = 30_000;
+const STABLE_RUNTIME_MS = 60_000;
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -56,6 +61,7 @@ interface Tracked {
 	logs: LogRing;
 	stopRequested: boolean;
 	lastError?: string;
+	restartTimer?: ReturnType<typeof setTimeout> | null;
 }
 
 export class BridgeSupervisor {
@@ -84,6 +90,10 @@ export class BridgeSupervisor {
 
 	async start(name: BridgeName): Promise<BridgeInfo> {
 		const t = this.requireBridge(name);
+		if (t.restartTimer) {
+			clearTimeout(t.restartTimer);
+			t.restartTimer = null;
+		}
 		if (t.proc) return this.toInfo(t);
 
 		const missing = this.missingEnv(t.spec);
@@ -119,9 +129,14 @@ export class BridgeSupervisor {
 					if (t.stopRequested) {
 						t.status = "stopped";
 					} else {
+						const runMs = t.startedAt ? Date.now() - t.startedAt : 0;
+						if (runMs >= STABLE_RUNTIME_MS) {
+							t.crashCount = 0; // stable run — reset crash budget
+						}
 						t.crashCount += 1;
 						t.status = "crashed";
-						log.warn(`bridge ${name} crashed`, { exitCode, signalCode });
+						log.warn(`bridge ${name} crashed`, { exitCode, signalCode, runMs });
+						this.scheduleRestart(t);
 					}
 				},
 			});
@@ -146,6 +161,10 @@ export class BridgeSupervisor {
 
 	async stop(name: BridgeName): Promise<BridgeInfo> {
 		const t = this.requireBridge(name);
+		if (t.restartTimer) {
+			clearTimeout(t.restartTimer);
+			t.restartTimer = null;
+		}
 		if (!t.proc) {
 			t.status = "stopped";
 			return this.toInfo(t);
@@ -172,6 +191,11 @@ export class BridgeSupervisor {
 	}
 
 	async restart(name: BridgeName): Promise<BridgeInfo> {
+		const t = this.requireBridge(name);
+		if (t.restartTimer) {
+			clearTimeout(t.restartTimer);
+			t.restartTimer = null;
+		}
 		await this.stop(name);
 		return this.start(name);
 	}
@@ -181,11 +205,50 @@ export class BridgeSupervisor {
 	}
 
 	async shutdown(): Promise<void> {
+		for (const t of this.tracked.values()) {
+			if (t.restartTimer) {
+				clearTimeout(t.restartTimer);
+				t.restartTimer = null;
+			}
+		}
 		await Promise.all(
 			Array.from(this.tracked.keys()).map((name) =>
 				this.stop(name).catch((err) => log.warn(`bridge ${name} shutdown failed`, err)),
 			),
 		);
+	}
+
+	async autoStart(): Promise<void> {
+		for (const t of this.tracked.values()) {
+			const missing = this.missingEnv(t.spec);
+			if (missing.length > 0) {
+				log.info(`skipping auto-start for ${t.spec.name}: missing ${missing.join(", ")}`);
+				continue;
+			}
+			try {
+				await this.start(t.spec.name);
+			} catch (err) {
+				log.warn(`auto-start failed for ${t.spec.name}`, err);
+			}
+		}
+	}
+
+	private scheduleRestart(t: Tracked): void {
+		if (t.crashCount > MAX_RESTARTS) {
+			log.warn(`bridge ${t.spec.name} giving up after ${t.crashCount} crashes`);
+			return;
+		}
+		if (t.restartTimer) {
+			clearTimeout(t.restartTimer);
+			t.restartTimer = null;
+		}
+		const delay = Math.min(BASE_DELAY_MS * 2 ** (t.crashCount - 1), MAX_DELAY_MS);
+		t.restartTimer = setTimeout(() => {
+			t.restartTimer = null;
+			void this.start(t.spec.name).catch((err) => {
+				log.warn(`bridge ${t.spec.name} auto-restart failed`, err);
+			});
+		}, delay);
 	}
 
 	private requireBridge(name: BridgeName): Tracked {

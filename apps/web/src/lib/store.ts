@@ -159,7 +159,7 @@ interface StoreState {
 	disconnect(): void;
 	refreshWorkspaces(): Promise<void>;
 	refreshSessions(cwd?: string): Promise<void>;
-	createSession(opts: { cwd: string; resumeFromPath?: string }): Promise<string>;
+	createSession(opts: { cwd: string; resumeFromPath?: string; external?: boolean }): Promise<string>;
 	selectSession(id: string): void;
 	sendPrompt(text: string, images?: import("@omp-deck/protocol").ImageAttachment[]): void;
 	abort(): void;
@@ -174,6 +174,7 @@ interface StoreState {
 	editQueued(queuedId: string, text: string, images?: import("@omp-deck/protocol").ImageAttachment[]): void;
 	disposeSession(id: string): Promise<void>;
 	renameSession(id: string, name: string): Promise<void>;
+	archiveSession(id: string): Promise<void>;
 	toggleAllToolCards(): void;
 	setToolCardOpen(id: string, open: boolean): void;
 	setPendingDraft(draft: { text: string } | undefined): void;
@@ -268,6 +269,7 @@ export const useStore = create<StoreState>()(
 			const created = await api.createSession({
 				cwd: opts.cwd,
 				...(opts.resumeFromPath ? { resumeFromPath: opts.resumeFromPath } : {}),
+				...(opts.external ? { external: true } : {}),
 			});
 			// Subscribe immediately; reducer will hydrate from the `subscribed` snapshot.
 			get().ws?.send({ type: "subscribe", sessionId: created.sessionId });
@@ -355,6 +357,24 @@ export const useStore = create<StoreState>()(
 				return { sessionsById: next, sessions };
 			});
 		},
+		async archiveSession(id) {
+			// Re-throw on failure so the caller can surface a clear error.
+			await api.archiveSession(id);
+			get().ws?.send({ type: "unsubscribe", sessionId: id });
+			set((s) => {
+				const next = new Set(s.subscribed);
+				next.delete(id);
+				const sessionsById = { ...s.sessionsById };
+				delete sessionsById[id];
+				return {
+					subscribed: next,
+					sessionsById,
+					activeId: s.activeId === id ? undefined : s.activeId,
+				};
+			});
+			void get().refreshSessions();
+		},
+
 
 		toggleAllToolCards() {
 			set((s) => ({

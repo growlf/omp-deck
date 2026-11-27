@@ -33,6 +33,8 @@ export interface SessionSummary {
 	createdAt: string;
 	updatedAt: string;
 	messageCount: number;
+	/** True iff the session is file-backed and owned by an external omp process. */
+	external?: boolean;
 }
 
 export interface WorkspaceEntry {
@@ -47,6 +49,8 @@ export interface CreateSessionRequest {
 	model?: ModelRef;
 	/** Do not fire the configured auto-start prompt when this creates a fresh session. */
 	suppressAutoStart?: boolean;
+	/** True iff this resume targets a session owned by an external omp process (tail-only, read-only). */
+	external?: boolean;
 }
 
 export interface CreateSessionResponse {
@@ -764,6 +768,8 @@ export interface SessionSnapshot {
 	 * queue immediately instead of waiting for the next `queue_state` event.
 	 */
 	queuedPrompts?: QueuedPromptWire[];
+	/** True iff the session is file-backed and owned by an external omp process. */
+	external?: boolean;
 }
 
 /**
@@ -882,7 +888,7 @@ export type ClientFrame =
 export type ServerFrame =
 	| { type: "hello"; connectionId: string }
 	| { type: "pong" }
-	| { type: "subscribed"; sessionId: string; snapshot: SessionSnapshot }
+	| { type: "subscribed"; sessionId: string; snapshot: SessionSnapshot; external?: boolean }
 	| { type: "unsubscribed"; sessionId: string }
 	| { type: "session_event"; sessionId: string; event: AgentSessionEventJson }
 	| { type: "session_disposed"; sessionId: string }

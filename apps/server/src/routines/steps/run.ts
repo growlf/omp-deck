@@ -6,6 +6,7 @@
 import type { RoutineStep } from "@omp-deck/protocol";
 import { renderString } from "../template.ts";
 import type { RunContext, StepResult } from "../types.ts";
+import { expandCwdPath, routineSpawnEnv } from "../types.ts";
 
 const MAX_EXCERPT = 8 * 1024;
 
@@ -20,16 +21,18 @@ export async function executeRunStep(
 	const cwd = step.cwd
 		? renderString(step.cwd, context as unknown as Record<string, unknown>)
 		: defaultCwd;
+	const expandedCwd = expandCwdPath(cwd);
 	const isWin = process.platform === "win32";
 	const cmd = isWin ? ["cmd", "/c", command] : ["bash", "-lc", command];
 
 	try {
 		const proc = Bun.spawn(cmd, {
-			cwd,
+			cwd: expandedCwd,
 			stdin: "ignore",
 			stdout: "pipe",
 			stderr: "pipe",
 			windowsHide: true,
+			env: routineSpawnEnv(),
 		});
 		const onAbort = () => {
 			try {

@@ -88,12 +88,16 @@ export interface CreateSessionOpts {
 
 export interface ResumeSessionOpts {
 	sessionPath: string;
+	/** True iff this resume targets a session owned by an external omp process (tail-only, read-only). */
+	external?: boolean;
 }
 
 export type EventListener = (event: AgentSessionEventJson) => void;
 
 export interface SessionHandle {
 	readonly sessionId: string;
+	/** True iff this handle is tailer-backed (resumed from an external omp process's file). */
+	readonly isResumed: boolean;
 	readonly sessionFile: string | undefined;
 	readonly cwd: string;
 
@@ -182,6 +186,12 @@ export interface SessionHandle {
 		proposalId: string,
 		response: PlanApprovalResponse,
 	): Promise<"settled" | "unknown">;
+	/**
+	 * Push a fresh `session_updated` frame to every current subscriber.
+	 * Used by the HTTP routes (rename on external / resumed sessions) where
+	 * no SDK event will fire.
+	 */
+	emitSessionUpdated(): void;
 }
 
 export type SlashDispatchResult =

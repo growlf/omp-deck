@@ -19,10 +19,10 @@ HTTPS with mTLS-style identity.
 
 ```sh
 # Run the deck loopback-only — the default
-OMP_DECK_HOST=127.0.0.1 OMP_DECK_PORT=8787 bun run start
+OMP_DECK_HOST=127.0.0.1 OMP_DECK_PORT=8788 bun run start
 
 # Then on the same host:
-tailscale serve --bg --https=443 http://127.0.0.1:8787
+tailscale serve --bg --https=443 http://127.0.0.1:8788
 
 # Open from any tailnet device — including your phone:
 open https://<hostname>.<tailnet>.ts.net
@@ -34,7 +34,7 @@ tailnet can reach the deck.
 **Sharing externally** — use Tailscale Funnel:
 
 ```sh
-tailscale funnel --bg --https=443 http://127.0.0.1:8787
+tailscale funnel --bg --https=443 http://127.0.0.1:8788
 ```
 
 Funnel exposes the URL to the public internet. Anyone with the link can
@@ -47,11 +47,11 @@ If you don't run Tailscale on the host:
 
 ```sh
 # On the deck host:
-bun run start                                        # bound to 127.0.0.1:8787
+bun run start                                        # bound to 127.0.0.1:8788
 
 # On your local box:
-ssh -L 8787:127.0.0.1:8787 user@deck-host
-# Then open http://localhost:8787 in your laptop browser
+ssh -L 8788:127.0.0.1:8788 user@deck-host
+# Then open http://localhost:8788 in your laptop browser
 ```
 
 Stick it in `~/.ssh/config` for a persistent tunnel:
@@ -60,7 +60,7 @@ Stick it in `~/.ssh/config` for a persistent tunnel:
 Host deck-host
   HostName <ip-or-hostname>
   User <user>
-  LocalForward 8787 127.0.0.1:8787
+  LocalForward 8788 127.0.0.1:8788
 ```
 
 ## Docker
@@ -72,7 +72,7 @@ server in production mode (loopback by default).
 ```sh
 docker build -t omp-deck .
 docker run -d --name omp-deck \
-  -p 127.0.0.1:8787:8787 \
+  -p 127.0.0.1:8788:8788 \
   -v omp-deck-agent:/data/omp-agent \
   -v /srv/work:/workspace \
   -e OMP_AGENT_DIR=/data/omp-agent \
@@ -87,7 +87,7 @@ Compose:
 docker compose up -d
 ```
 
-The compose file binds `127.0.0.1:8787` on the host and mounts a named volume
+The compose file binds `127.0.0.1:8788` on the host and mounts a named volume
 for omp's session+auth state. Sit Tailscale on top of the host port — same
 recipe as above.
 

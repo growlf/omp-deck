@@ -99,4 +99,10 @@ export const api = {
 		// If it fails with "cannot read directory", the path doesn't exist.
 		return this.browseDir(path, 1).then(() => ({ ok: true }));
 	},
+	archiveSession(id: string): Promise<{ archivedTo: string | null; error?: string }> {
+		return request(`/sessions/${encodeURIComponent(id)}/archive`, {
+			method: "POST",
+			body: JSON.stringify({}),
+		});
+	},
 };

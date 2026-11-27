@@ -181,7 +181,7 @@ function applyHotUpdates(
 	return applied;
 }
 
-function isLoopbackRequest(req: Request): boolean {
+export function isLoopbackRequest(req: Request): boolean {
 	const host = new URL(req.url).hostname.toLowerCase();
 	return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
 }

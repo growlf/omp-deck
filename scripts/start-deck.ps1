@@ -29,4 +29,4 @@ Start-Process $deckUrl
 Write-Output ""
 Write-Output "Ready."
 Write-Output ("Deck: " + $deckUrl)
-Write-Output ("API health: http://127.0.0.1:8787/api/health")
+Write-Output ("API health: http://127.0.0.1:8788/api/health")

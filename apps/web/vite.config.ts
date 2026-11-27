@@ -17,7 +17,7 @@ function readManagedEnvPort(): string | undefined {
 	}
 }
 
-const SERVER_PORT = process.env.OMP_DECK_PORT ?? readManagedEnvPort() ?? "8787";
+const SERVER_PORT = process.env.OMP_DECK_PORT ?? readManagedEnvPort() ?? "8788";
 const SERVER_HOST = process.env.OMP_DECK_HOST ?? "0.0.0.0";
 const WEB_PORT = Number(process.env.OMP_DECK_WEB_PORT ?? "5173");
 

@@ -164,7 +164,7 @@ export class WsHub {
 			const handle = this.bridge.getSession(sessionId);
 			if (handle) {
 				this.bridge.bumpActivity(sessionId);
-				send(ws, { type: "subscribed", sessionId, snapshot: handle.snapshot() });
+				send(ws, { type: "subscribed", sessionId, snapshot: handle.snapshot(), external: handle.isResumed === true });
 			}
 			return;
 		}
@@ -210,7 +210,7 @@ export class WsHub {
 		};
 		ws.data.subscriptions.set(sessionId, teardown);
 		this.bridge.trackSubscriberAdded(sessionId, connectionId);
-		send(ws, { type: "subscribed", sessionId, snapshot: handle.snapshot() });
+		send(ws, { type: "subscribed", sessionId, snapshot: handle.snapshot(), external: handle.isResumed === true });
 	}
 
 	private handleUnsubscribe(ws: ServerWebSocket<ConnectionData>, sessionId: string): void {
@@ -230,6 +230,10 @@ export class WsHub {
 		const handle = this.bridge.getSession(frame.sessionId);
 		if (!handle) {
 			send(ws, { type: "error", sessionId: frame.sessionId, error: "session not active" });
+			return;
+		}
+		if (handle.isResumed) {
+			send(ws, { type: "error", sessionId: frame.sessionId, error: "external session — read-only; stop the external process to modify" });
 			return;
 		}
 		const opts: { streamingBehavior?: "steer" | "followUp"; images?: typeof frame.images } = {};
@@ -273,6 +277,10 @@ export class WsHub {
 			send(ws, { type: "error", sessionId, error: "session not active" });
 			return;
 		}
+		if (handle.isResumed) {
+			send(ws, { type: "error", sessionId, error: "external session — read-only; stop the external process to modify" });
+			return;
+		}
 		this.bridge.bumpActivity(sessionId);
 		try {
 			await handle.abort();
@@ -285,6 +293,10 @@ export class WsHub {
 		const handle = this.bridge.getSession(sessionId);
 		if (!handle) {
 			send(ws, { type: "error", sessionId, error: "session not active" });
+			return;
+		}
+		if (handle.isResumed) {
+			send(ws, { type: "error", sessionId, error: "external session — read-only; stop the external process to modify" });
 			return;
 		}
 		this.bridge.bumpActivity(sessionId);
@@ -302,6 +314,10 @@ export class WsHub {
 		const handle = this.bridge.getSession(frame.sessionId);
 		if (!handle) {
 			send(ws, { type: "error", sessionId: frame.sessionId, error: "session not active" });
+			return;
+		}
+		if (handle.isResumed) {
+			send(ws, { type: "error", sessionId: frame.sessionId, error: "external session — read-only; stop the external process to modify" });
 			return;
 		}
 		this.bridge.bumpActivity(frame.sessionId);
@@ -323,6 +339,10 @@ export class WsHub {
 		const handle = this.bridge.getSession(frame.sessionId);
 		if (!handle) {
 			send(ws, { type: "error", sessionId: frame.sessionId, error: "session not active" });
+			return;
+		}
+		if (handle.isResumed) {
+			send(ws, { type: "error", sessionId: frame.sessionId, error: "external session — read-only; stop the external process to modify" });
 			return;
 		}
 		// Refuse silently-empty edits — the user almost certainly meant cancel.
@@ -354,6 +374,11 @@ export class WsHub {
 		// from any connection that received the open frame (the bridge replays
 		// pending frames on subscribe). Bumping activity keeps the reaper away
 		// while the user is mid-decision.
+		const handle = this.bridge.getSession(frame.sessionId);
+		if (handle && handle.isResumed) {
+			send(ws, { type: "error", sessionId: frame.sessionId, error: "external session — read-only; stop the external process to modify" });
+			return;
+		}
 		this.bridge.bumpActivity(frame.sessionId);
 		const { type: _t, sessionId, dialogId, ...response } = frame;
 		void _t;
@@ -378,6 +403,10 @@ export class WsHub {
 			send(ws, { type: "error", sessionId: frame.sessionId, error: "session not active" });
 			return;
 		}
+		if (handle.isResumed) {
+			send(ws, { type: "error", sessionId: frame.sessionId, error: "external session — read-only; stop the external process to modify" });
+			return;
+		}
 		this.bridge.bumpActivity(frame.sessionId);
 		try {
 			await handle.setPlanMode(frame.enabled);
@@ -399,6 +428,11 @@ export class WsHub {
 		// plan_proposed (replayed on subscribe) is allowed to answer. We
 		// bump activity to keep the reaper away while the user is mid-
 		// decision and during the renaming/synthetic-prompt phase.
+		const handle = this.bridge.getSession(frame.sessionId);
+		if (handle && handle.isResumed) {
+			send(ws, { type: "error", sessionId: frame.sessionId, error: "external session — read-only; stop the external process to modify" });
+			return;
+		}
 		this.bridge.bumpActivity(frame.sessionId);
 		const { approved, finalPath, editedContent, proposalId, sessionId } = frame;
 		try {

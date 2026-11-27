@@ -16,7 +16,7 @@ description: Summarize the active workspace and surface anything in-flight
 
 Summarize the current workspace's state for me. Cover:
 
-- Active kanban tasks (read via `curl http://127.0.0.1:8787/api/tasks`,
+- Active kanban tasks (read via `curl http://127.0.0.1:8788/api/tasks`,
   filtering by `stateId === "s_active"` for the current `cwd`). Show their
   T-ids and titles.
 - Recent git activity — last 5 commits (`git log -5 --oneline`) and any

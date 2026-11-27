@@ -15,7 +15,7 @@ steps:
   - id: fetch_health
     type: http
     method: GET
-    url: http://127.0.0.1:8787/api/health
+    url: http://127.0.0.1:8788/api/health
     expect_json: true
     on_failure: abort
   - id: extract_pid
@@ -52,21 +52,21 @@ $createBody = @{
 } | ConvertTo-Json -Depth 10 -Compress
 
 Write-Output "=== Step 1: Create routine ==="
-$created = Invoke-RestMethod -Uri "http://127.0.0.1:8787/api/routines" -Method POST `
+$created = Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/routines" -Method POST `
     -ContentType "application/json" -Body $createBody
 Write-Output ("Created routine id=" + $created.id + " specVersion=" + $created.specVersion + " concurrency=" + $created.concurrency)
 $routineId = $created.id
 
 Write-Output ""
 Write-Output "=== Step 2: Manual run (first time) ==="
-Invoke-RestMethod -Uri "http://127.0.0.1:8787/api/routines/$routineId/run" -Method POST `
+Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/routines/$routineId/run" -Method POST `
     -ContentType "application/json" -Body "{}" | Out-Null
 
 Start-Sleep -Seconds 2
 
 Write-Output ""
 Write-Output "=== Step 3: Inspect run history ==="
-$runs = Invoke-RestMethod -Uri "http://127.0.0.1:8787/api/routines/$routineId/runs?limit=5"
+$runs = Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/routines/$routineId/runs?limit=5"
 $run1 = $runs.runs[0]
 Write-Output ("Latest run: " + $run1.id)
 Write-Output ("  trigger:           " + $run1.trigger)
@@ -81,7 +81,7 @@ Write-Output ("  abortReason:       " + $run1.abortReason)
 
 Write-Output ""
 Write-Output "=== Step 4: Per-step records ==="
-$steps = Invoke-RestMethod -Uri ("http://127.0.0.1:8787/api/routines/$routineId/runs/" + $run1.id + "/steps")
+$steps = Invoke-RestMethod -Uri ("http://127.0.0.1:8788/api/routines/$routineId/runs/" + $run1.id + "/steps")
 foreach ($s in $steps.steps) {
     Write-Output ("  [" + $s.stepIndex + "] " + $s.stepId + " (" + $s.stepType + "): " + $s.status + " in " + $s.durationMs + "ms")
     if ($s.error) { Write-Output ("      error: " + $s.error) }
@@ -102,12 +102,12 @@ if (Test-Path $marker) {
 
 Write-Output ""
 Write-Output "=== Step 6: Manual run (second time - exercise state persistence) ==="
-Invoke-RestMethod -Uri "http://127.0.0.1:8787/api/routines/$routineId/run" -Method POST `
+Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/routines/$routineId/run" -Method POST `
     -ContentType "application/json" -Body "{}" | Out-Null
 Start-Sleep -Seconds 2
-$runs2 = Invoke-RestMethod -Uri "http://127.0.0.1:8787/api/routines/$routineId/runs?limit=5"
+$runs2 = Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/routines/$routineId/runs?limit=5"
 $run2 = $runs2.runs[0]
-$steps2 = Invoke-RestMethod -Uri ("http://127.0.0.1:8787/api/routines/$routineId/runs/" + $run2.id + "/steps")
+$steps2 = Invoke-RestMethod -Uri ("http://127.0.0.1:8788/api/routines/$routineId/runs/" + $run2.id + "/steps")
 $bumpStep = $steps2.steps | Where-Object { $_.stepId -eq "bump_state" } | Select-Object -First 1
 Write-Output ("Second run bump_state output: " + $bumpStep.outputJson)
 if (Test-Path $marker) {
@@ -117,6 +117,6 @@ if (Test-Path $marker) {
 
 Write-Output ""
 Write-Output "=== Step 7: Cleanup (delete smoke routine) ==="
-Invoke-RestMethod -Uri "http://127.0.0.1:8787/api/routines/$routineId" -Method DELETE | Out-Null
+Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/routines/$routineId" -Method DELETE | Out-Null
 Remove-Item $marker -ErrorAction SilentlyContinue
 Write-Output ("Deleted routine " + $routineId)

@@ -11,6 +11,9 @@ import type {
 	RoutineStepStatus,
 } from "@omp-deck/protocol";
 
+import path from "node:path";
+import { resolveHome } from "../resolve-home.ts";
+
 /** What a step executor returns. Always non-throwing — exceptions become this shape. */
 export interface StepResult {
 	status: Exclude<RoutineStepStatus, "pending" | "running">;
@@ -94,3 +97,22 @@ export type StepExecutor = (
 	context: RunContext,
 	signal: AbortSignal,
 ) => Promise<StepResult>;
+
+/** Enriched env for subprocesses: adds ~/.local/bin and ~/bin to PATH so
+ * user-installed CLIs (like `omp`) are discoverable. */
+export function routineSpawnEnv(): NodeJS.ProcessEnv {
+	const home = resolveHome();
+	const extra = `${home}/.local/bin:${home}/bin`;
+	const existing = process.env.PATH ?? "";
+	return { ...process.env, PATH: `${extra}:${existing}` };
+}
+/** Expand a leading `~` (POSIX `~/` or Windows `~\`, bare `~` included) in
+ * a path to the resolved home directory. Bun.spawn does not expand `~` in
+ * the cwd field — it will ENOENT on an unexpanded tilde. */
+export function expandCwdPath(p: string): string {
+	if (p === "~") return resolveHome();
+	if (p.startsWith("~/") || p.startsWith("~\\")) {
+		return path.join(resolveHome(), p.slice(2));
+	}
+	return p;
+}

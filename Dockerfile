@@ -10,10 +10,10 @@
 #   docker build -t omp-deck .
 #
 # Run (loopback, expose via Tailscale Funnel / SSH tunnel on host):
-#   docker run --rm -p 127.0.0.1:8787:8787 \
+#   docker run --rm -p 127.0.0.1:8788:8788 \
 #     -v omp-deck-agent:/root/.omp/agent \
 #     -e OMP_DECK_HOST=0.0.0.0 \
-#     -e OMP_DECK_PORT=8787 \
+#     -e OMP_DECK_PORT=8788 \
 #     omp-deck
 
 # ─── Stage 1: build web ────────────────────────────────────────────────────
@@ -67,9 +67,9 @@ COPY --from=web-build /app/apps/web/dist /app/apps/web/dist
 # its cwd. Pin it explicitly here.
 ENV OMP_DECK_WEB_DIST=/app/apps/web/dist \
     OMP_DECK_HOST=0.0.0.0 \
-    OMP_DECK_PORT=8787 \
+    OMP_DECK_PORT=8788 \
     NODE_ENV=production
 
 WORKDIR /app/apps/server
-EXPOSE 8787
+EXPOSE 8788
 CMD ["bun", "src/index.ts"]
