@@ -71,7 +71,7 @@ npm install -g omp-deck
 omp-deck
 ```
 
-Boots on <http://127.0.0.1:8787> — open it in your browser. On first run, the deck creates `~/.omp/agent/` from scratch and installs starter skills + extensions; its own state lives in `~/.omp-deck/` (override with `OMP_DECK_DATA_DIR`). If you already use `omp` in a terminal on this machine, your existing `~/.omp/agent` is picked up automatically — no re-auth.
+Boots on <http://127.0.0.1:8788> — open it in your browser. On first run, the deck creates `~/.omp/agent/` from scratch and installs starter skills + extensions; its own state lives in `~/.omp-deck/` (override with `OMP_DECK_DATA_DIR`). If you already use `omp` in a terminal on this machine, your existing `~/.omp/agent` is picked up automatically — no re-auth.
 
 **Authenticate (one-time, in the deck UI):**
 
@@ -95,7 +95,7 @@ bun run dev
 
 Open <http://127.0.0.1:5173>.
 
-On **Windows**, you can also double-click `Start-OMP-Deck.cmd` from the repo root — it boots the server on `:8787`, starts the Vite app on `:5173`, opens the deck in your browser, and writes logs under `.logs/`. On **macOS / Linux**, the sibling is `bash Start-OMP-Deck.sh start` (`stop` / `status` subcommands too); bare invocation runs foreground, same as `bun run dev`.
+On **Windows**, you can also double-click `Start-OMP-Deck.cmd` from the repo root — it boots the server on `:8788`, starts the Vite app on `:5173`, opens the deck in your browser, and writes logs under `.logs/`. On **macOS / Linux**, the sibling is `bash Start-OMP-Deck.sh start` (`stop` / `status` subcommands too); bare invocation runs foreground, same as `bun run dev`.
 
 For container-based deployment, the repo ships a `Dockerfile` (Debian-slim base, glibc-compatible); see [docs/deployment.md](./docs/deployment.md). For the full step-by-step (Bun install, optional `omp` CLI, auth alternatives), see [docs/install.md](./docs/install.md).
 

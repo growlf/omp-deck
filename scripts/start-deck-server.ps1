@@ -9,13 +9,13 @@ $ts = Get-Date -Format "yyyyMMdd-HHmmss"
 $outLog = Join-Path $logDir "dev-server-$ts.out.log"
 $errLog = Join-Path $logDir "dev-server-$ts.err.log"
 
-# Pre-kill anyone holding 8787
+# Pre-kill anyone holding 8788
 $ns = & netstat -aon -p TCP
 foreach ($line in $ns) {
-    if ($line -match ":8787\s" -and $line -match "LISTENING") {
+    if ($line -match ":8788\s" -and $line -match "LISTENING") {
         $parts = $line.Trim() -split "\s+"
         $stalePid = [int]$parts[-1]
-        Write-Output ("Killing stale listener on 8787 PID=" + $stalePid)
+        Write-Output ("Killing stale listener on 8788 PID=" + $stalePid)
         Stop-Process -Id $stalePid -Force -ErrorAction SilentlyContinue
         Start-Sleep -Milliseconds 500
     }
@@ -37,7 +37,7 @@ $ready = $false
 for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Milliseconds 500
     try {
-        $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8787/api/health" -UseBasicParsing -TimeoutSec 1 -ErrorAction Stop
+        $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8788/api/health" -UseBasicParsing -TimeoutSec 1 -ErrorAction Stop
         if ($resp.StatusCode -eq 200) {
             $elapsed = $i * 0.5
             Write-Output ("Server ready after " + $elapsed + "s")

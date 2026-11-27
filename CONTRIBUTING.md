@@ -22,7 +22,7 @@ Workspaces are wired through Bun's `workspaces` field in the root `package.json`
 
 ```sh
 bun install
-bun run dev          # spawns server (8787) + vite (5173) in parallel
+bun run dev          # spawns server (8788) + vite (5173) in parallel
 ```
 
 If you want them in separate terminals:
@@ -63,7 +63,7 @@ state separation:
 
 | Concern                  | prod tree            | dev worktree                     |
 | ------------------------ | -------------------- | -------------------------------- |
-| Server port              | `OMP_DECK_PORT=8787` | `OMP_DECK_PORT=8889`             |
+| Server port              | `OMP_DECK_PORT=8788` | `OMP_DECK_PORT=8889`             |
 | Web (Vite) port          | `5173`               | `OMP_DECK_WEB_PORT=5273`         |
 | Kanban / inbox / routines| `deck.db`            | `deck.dev.db`                    |
 | Managed `.env`, audit log| default `DATA_DIR`   | `OMP_DECK_DATA_DIR=.deck-data`   |

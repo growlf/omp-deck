@@ -10,15 +10,15 @@ services:
     image: omp-deck:latest
     restart: unless-stopped
     # Loopback-only on the host. To expose over Tailscale, either:
-    #   - Run `tailscale serve --bg --https=443 http://127.0.0.1:8787`
+    #   - Run `tailscale serve --bg --https=443 http://127.0.0.1:8788`
     #   - Or bind the Tailscale interface IP instead of 127.0.0.1.
     ports:
-      - "127.0.0.1:8787:8787"
+      - "127.0.0.1:8788:8788"
     environment:
       # The container listens on all interfaces inside its network namespace.
       # Host-side loopback bind is what isolates it from the world.
       OMP_DECK_HOST: "0.0.0.0"
-      OMP_DECK_PORT: "8787"
+      OMP_DECK_PORT: "8788"
       OMP_DECK_WEB_DIST: "/app/apps/web/dist"
       # Default workspace cwd inside the container. Mount your actual workspace
       # under /workspace and set this to /workspace to give the agent access.
@@ -41,7 +41,7 @@ services:
     stop_signal: SIGTERM
     stop_grace_period: 10s
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8787/api/health"]
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8788/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3

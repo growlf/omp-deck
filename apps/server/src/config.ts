@@ -76,7 +76,7 @@ export function loadConfig(): Config {
 
 	return {
 		host: process.env.OMP_DECK_HOST?.trim() || "127.0.0.1",
-		port: parseInt10(process.env.OMP_DECK_PORT, 8787),
+		port: parseInt10(process.env.OMP_DECK_PORT, 8788),
 		defaultCwd: path.resolve(defaultCwd),
 		extraWorkspaces: extra.map((p) => path.resolve(p)),
 		agentDir,

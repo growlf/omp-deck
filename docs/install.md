@@ -4,7 +4,7 @@ omp-deck is the cockpit UI for [`oh-my-pi`](https://github.com/can1357/oh-my-pi)
 (`omp`).
 
 > **Fastest path:** `npm install -g omp-deck && omp-deck` — needs Bun ≥ 1.3.14
-> on `PATH`. Boots on <http://127.0.0.1:8787>; authenticate via Settings →
+> on `PATH`. Boots on <http://127.0.0.1:8788>; authenticate via Settings →
 > Providers (OAuth) or Settings → Env (API key). The `omp` CLI is **not**
 > required — the deck bundles the SDK in-process. See the [README quickstart](../README.md#quickstart).
 
@@ -117,7 +117,7 @@ covers the next 10 minutes of orientation.
 
 A quick smoke list after either path:
 
-1. **Health endpoint**: `curl http://127.0.0.1:8787/api/health` returns `{"ok":true,...}`.
+1. **Health endpoint**: `curl http://127.0.0.1:8788/api/health` returns `{"ok":true,...}`.
 2. **Web bundle**: opening <http://127.0.0.1:5173> shows the chat view (or
    the kanban — there's no auth, so any route works).
 3. **First session**: click "+ new session" in the sidebar, send any prompt.
@@ -171,8 +171,7 @@ rm -rf ~/.omp/                              # sessions + auth
 retry usually succeeds. If you're behind a corporate proxy, set
 `BUN_INSTALL_CACHE_DIR` and `HTTPS_PROXY`.
 
-**Port 8787 is already in use.** Set `OMP_DECK_PORT=8788` (or any free port)
-before `bun run dev`. The vite proxy auto-follows.
+**Port 8788 is already in use.** Set `OMP_DECK_PORT=<any free port>` before `bun run dev`. The vite proxy auto-follows.
 
 **No models appear in the model picker.** Open Settings → Env and confirm
 at least one of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc. is set. If you

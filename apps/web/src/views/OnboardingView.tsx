@@ -665,9 +665,9 @@ const DEFAULT_START_BODY = `You are starting a new session inside omp-deck. Befo
    - \`kb://system/org-system-hub.md\` — broader org context
 
 2. **Enumerate live workspace state.** From bash, in parallel:
-   - \`curl -s http://127.0.0.1:8787/api/tasks\` → kanban + open T-Ns
-   - \`curl -s http://127.0.0.1:8787/api/routines\` → enabled schedules
-   - \`curl -s "http://127.0.0.1:8787/api/inbox?includeProcessed=0"\` → unresolved captures
+  - \`curl -s http://127.0.0.1:8788/api/tasks\` → kanban + open T-Ns
+  - \`curl -s http://127.0.0.1:8788/api/routines\` → enabled schedules
+  - \`curl -s "http://127.0.0.1:8788/api/inbox?includeProcessed=0"\` → unresolved captures
 
 3. **Summarize in 4-6 lines.** Use this shape:
    - Open kanban (T-N + title)

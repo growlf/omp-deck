@@ -24,7 +24,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 	},
 	{
 		key: "OMP_DECK_PORT",
-		defaultValue: "8787",
+		defaultValue: "8788",
 		valueType: "int",
 		sensitive: false,
 		restartRequired: true,
@@ -107,7 +107,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 	},
 	{
 		key: "OMP_DECK_API_BASE",
-		defaultValue: "http://127.0.0.1:8787",
+		defaultValue: "http://127.0.0.1:8788",
 		valueType: "string",
 		sensitive: false,
 		restartRequired: false,

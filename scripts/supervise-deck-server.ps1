@@ -7,7 +7,7 @@
 #   - Exponential backoff 1s -> 60s on rapid crashes (<30s lifetime)
 #   - Backoff resets to 1s after a child runs >30s
 #   - Ctrl+C in the supervisor terminal kills the supervisor AND the child
-#   - The supervisor never holds port 8787 itself; it just orchestrates the child
+#   - The supervisor never holds port 8788 itself; it just orchestrates the child
 #
 # Usage:
 #   powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/supervise-deck-server.ps1
@@ -76,7 +76,7 @@ try {
   $consecutiveQuickExits = 0
 
   while (-not $script:shuttingDown) {
-    Clear-Stale-Port 8787
+    Clear-Stale-Port 8788
 
     $ts      = Get-Date -Format "yyyyMMdd-HHmmss"
     $outLog  = Join-Path $logDir ("dev-server-" + $ts + ".out.log")

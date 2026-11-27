@@ -121,7 +121,7 @@ const KB_SYSTEM_STUBS: ReadonlyArray<{ name: string; body: string }> = [
 			"",
 			"## Local API base",
 			"",
-			"`http://127.0.0.1:8787/api` — reachable from any session via `bash` + `curl`.",
+			"`http://127.0.0.1:8788/api` — reachable from any session via `bash` + `curl`.",
 			"",
 		].join("\n"),
 	},

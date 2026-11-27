@@ -45,7 +45,7 @@ $payload = @{
     cwd = "C:/Users/bryan/enclave/omp-deck"
 } | ConvertTo-Json -Depth 10 -Compress
 
-$resp = Invoke-RestMethod -Uri "http://127.0.0.1:8787/api/tasks" -Method POST -ContentType "application/json" -Body $payload
+$resp = Invoke-RestMethod -Uri "http://127.0.0.1:8788/api/tasks" -Method POST -ContentType "application/json" -Body $payload
 
 Write-Output ("Created T-" + $resp.displayId + " (" + $resp.id + ")")
 Write-Output ("Title: " + $resp.title)

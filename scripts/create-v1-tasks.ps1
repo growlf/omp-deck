@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 
 $jsonPath = "C:\Users\bryan\enclave\omp-deck\scripts\v1-routines-tasks.json"
 $stubDir = "C:\Users\bryan\enclave\my-org-new\tasks\backlog"
-$apiBase = "http://127.0.0.1:8787/api"
+$apiBase = "http://127.0.0.1:8788/api"
 
 # Read JSON via .NET so UTF-8 round-trips correctly on PS 5.1
 $utf8 = [System.Text.UTF8Encoding]::new($false)
@@ -79,7 +79,7 @@ Migrated to the omp-deck kanban as task ``$($t.taskId)`` ($($t.displayId)) on $t
 
 omp-deck is the source of truth for omp-deck-scoped work. Open the deck (http://127.0.0.1:5174/tasks) or pull via REST:
 
-    curl -s http://127.0.0.1:8787/api/tasks/$($t.taskId)
+    curl -s http://127.0.0.1:8788/api/tasks/$($t.taskId)
 
 Companion plan: ``C:/Users/bryan/enclave/omp-deck/docs/proposals/routines-v1-plan.md``.
 

@@ -38,7 +38,7 @@ The same directory holds:
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
 | `OMP_DECK_HOST` | `127.0.0.1` | yes | Bind host. Loopback by default — never `0.0.0.0` without an auth layer. |
-| `OMP_DECK_PORT` | `8787` | yes | HTTP + WebSocket port. |
+| `OMP_DECK_PORT` | `8788` | yes | HTTP + WebSocket port. |
 | `OMP_DECK_WEB_PORT` | `5173` | yes | Vite dev server port (dev only). Proxies `/api` and `/ws` to `OMP_DECK_PORT`. |
 | `OMP_DECK_API_BASE` | derived | no | Loopback URL standalone bridge processes use. Derived from host+port when unset. |
 
@@ -53,8 +53,8 @@ The same directory holds:
 
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
-| `OMP_AGENT_DIR` | `~/.omp/agent` | yes | omp SDK session + auth data directory. |
-| `OMP_MODEL` | SDK default | next session | Default model id (e.g. `anthropic/claude-opus-4-7`). The model picker in the chat header overrides per-session. |
+| `OMP_AGENT_DIR` | `~/.omp/agent` | yes | Used for the persisted-session count in the onboarding check only. The SDK and the deck's sessions always live under `~/.omp/agent` (or `PI_CODING_AGENT_DIR`) — OMP_AGENT_DIR is not consumed by the SDK path yet (wiring pending). |
+| `OMP_MODEL` | SDK default | next session | Default model id (e.g. `llama.cpp/inkling-2-mini`). Not consumed by the SDK path yet (wiring pending) — the SDK uses the default model from `~/.omp/agent/config.yml`. The model picker in the chat header overrides per-session. |
 | `PI_NO_TITLE` | _(unset)_ | next session | Set truthy to disable SDK auto-title generation. |
 
 ### Auto-start (off by default)
