@@ -191,7 +191,7 @@ steps:
   - id: summarize
     type: agent
     when: steps.should_run.json === true
-    model: claude-sonnet-4-6
+    model: llama.cpp/inkling-2-mini
     timeout_secs: 60
     prompt: |
       Summarize what shipped yesterday as 3-5 markdown bullets. Skip ceremony.
