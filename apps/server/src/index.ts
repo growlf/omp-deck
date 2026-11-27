@@ -104,6 +104,7 @@ async function main(): Promise<void> {
 	routinesRunner.start();
 	let server: Server<ConnectionData>;
 	const supervisor = buildDefaultBridgeSupervisor();
+	void supervisor.autoStart().catch((err) => { log.error("bridge auto-start failed", err); });
 	const marketplaceService = new MarketplaceService();
 	const skillsService = new SkillsService(config, marketplaceService);
 	const kbService = new KbService({ root: resolveKbRoot() });
