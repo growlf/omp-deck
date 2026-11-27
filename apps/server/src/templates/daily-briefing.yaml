@@ -57,7 +57,7 @@ steps:
   - id: write_briefing
     type: agent
     when: steps.should_run.json === true
-    model: claude-sonnet-4-6
+    model: llama.cpp/inkling-2-mini
     timeout_secs: 90
     prompt: |
       Generate a morning briefing in markdown. Keep it tight - 6 to 10 bullets total.

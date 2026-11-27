@@ -34,6 +34,10 @@ const PRICES_PER_MILLION: Record<string, { input: number; output: number }> = {
 	"claude-haiku-4-5": { input: 1.0, output: 5.0 },
 	"gpt-4o": { input: 5.0, output: 15.0 },
 	"gpt-4o-mini": { input: 0.15, output: 0.6 },
+	// Local models served through an OpenAI-compatible gateway (free, unmetered).
+	"llama.cpp/inkling-2-mini": { input: 0.0, output: 0.0 },
+	"inkling-2-mini": { input: 0.0, output: 0.0 },
+	"vllm/inkling-2-mini": { input: 0.0, output: 0.0 },
 	// Sensible default for unknown models — assume sonnet-tier pricing so the
 	// estimate errs on the side of triggering the budget alarm.
 	default: { input: 3.0, output: 15.0 },
