@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import { Archive, Plus, RefreshCw } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { cn, shortPath } from "@/lib/utils";
 
@@ -12,6 +12,7 @@ export function Sidebar() {
 	const refreshSessions = useStore((s) => s.refreshSessions);
 	const refreshWorkspaces = useStore((s) => s.refreshWorkspaces);
 	const createSession = useStore((s) => s.createSession);
+	const archiveSession = useStore((s) => s.archiveSession);
 	const selectSession = useStore((s) => s.selectSession);
 
 	const [selectedCwd, setSelectedCwd] = useState<string | "">("");
@@ -36,10 +37,10 @@ export function Sidebar() {
 		}
 	}
 
-	async function handleResume(p: string): Promise<void> {
+	async function handleResume(p: string, external?: boolean): Promise<void> {
 		setCreating(true);
 		try {
-			await createSession({ cwd: cwdInUse, resumeFromPath: p });
+			await createSession({ cwd: cwdInUse, resumeFromPath: p, ...(external ? { external: true } : {}) });
 		} catch (err) {
 			console.error(err);
 			alert(`Failed to resume: ${String(err)}`);
@@ -48,8 +49,33 @@ export function Sidebar() {
 		}
 	}
 
-	const liveSessions = Object.values(sessionsById);
-	const persisted = filtered.filter((s) => !sessionsById[s.id]);
+	async function handleArchive(id: string): Promise<void> {
+		if (!window.confirm("Archive this session? It will move the session file into the archive folder.")) return;
+		try {
+			await archiveSession(id);
+		} catch (err) {
+			console.error(err);
+			alert(`Failed to archive session: ${String(err)}`);
+		}
+	}
+
+	const liveSessions = Object.values(sessionsById).filter((s) => s.external !== true);
+	const deckPersisted = filtered.filter((s) => !sessionsById[s.id]);
+	const externalPersisted = Object.values(sessionsById)
+		.filter((s) => s.external === true)
+		.map((s) => ({
+			id: s.sessionId,
+			path: s.sessionFile ?? "",
+			cwd: s.cwd,
+			title: s.sessionName ?? undefined,
+			createdAt: "",
+			updatedAt: "",
+			messageCount: 0,
+			external: true,
+		}));
+	const persisted = [...deckPersisted, ...externalPersisted].sort((a, b) =>
+		(b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""),
+	);
 
 	return (
 		<div className="flex h-full min-h-0 flex-col">
@@ -124,17 +150,20 @@ export function Sidebar() {
 					<div className="my-2 mx-2 border-t border-line" />
 				) : null}
 
-				{persisted.map((s) => (
-					<SessionRow
-						key={s.id}
-						title={s.title || formatSessionId(s.id)}
-						subtitle={`${shortPath(s.cwd, 26)} · ${s.messageCount}m`}
-						meta={formatRelative(s.updatedAt || s.createdAt)}
-						onClick={() => void handleResume(s.path)}
-					/>
-				))}
+			{persisted.map((row) => (
+				<SessionRow
+					key={row.id}
+					title={row.title || formatSessionId(row.id)}
+					subtitle={`${shortPath(row.cwd, 26)} · ${row.messageCount}m`}
+					meta={formatRelative(row.updatedAt || row.createdAt)}
+					ext={row.external === true}
+					onArchive={() => void handleArchive(row.id)}
+					active={row.id === activeId}
+					onClick={() => void handleResume(row.path, row.external === true)}
+				/>
+			))}
 
-				{filtered.length === 0 && liveSessions.length === 0 ? (
+				{filtered.length === 0 && liveSessions.length === 0 && persisted.length === 0 ? (
 					<div className="px-3 py-6 text-center font-mono text-2xs text-ink-3">
 						No sessions yet.
 					</div>
@@ -151,6 +180,8 @@ function SessionRow({
 	active,
 	live,
 	planMode,
+	ext,
+	onArchive,
 	onClick,
 }: {
 	title: string;
@@ -159,6 +190,8 @@ function SessionRow({
 	active?: boolean;
 	live?: boolean;
 	planMode?: boolean;
+	ext?: boolean;
+	onArchive?: () => void;
 	onClick: () => void;
 }) {
 	return (
@@ -177,6 +210,14 @@ function SessionRow({
 					<span className="h-1.5 w-1.5 shrink-0 rounded-full bg-line-strong" />
 				)}
 				<span className="truncate">{title}</span>
+				{ext ? (
+					<span
+						className="shrink-0 rounded border border-line-strong px-1 py-px font-mono text-[10px] uppercase tracking-meta text-ink-3"
+						title="External session"
+					>
+						ext
+					</span>
+				) : null}
 				{planMode ? (
 					<span
 						className="ml-auto shrink-0 rounded border border-thinking/40 bg-thinking/10 px-1 py-px font-mono text-[10px] uppercase tracking-meta text-thinking"
@@ -191,8 +232,32 @@ function SessionRow({
 					{subtitle}
 				</div>
 			) : null}
-			{meta ? (
-				<div className="truncate pl-3 font-mono text-2xs text-ink-4">{meta}</div>
+			{meta || onArchive ? (
+				<div className="flex items-center gap-2 pl-3 font-mono text-2xs text-ink-4">
+					<span className="truncate">{meta}</span>
+					{onArchive ? (
+						<span
+							role="button"
+							tabIndex={0}
+							title="Archive session"
+							aria-label="Archive session"
+							onClick={(e) => {
+								e.stopPropagation();
+								onArchive();
+							}}
+							onKeyDown={(e) => {
+								if (e.key === "Enter" || e.key === " ") {
+									e.preventDefault();
+									e.stopPropagation();
+									onArchive();
+								}
+							}}
+							className="ml-auto shrink-0 text-ink-3 transition-colors hover:text-ink"
+						>
+							<Archive size={12} />
+						</span>
+					) : null}
+				</div>
 			) : null}
 		</button>
 	);

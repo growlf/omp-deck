@@ -54,6 +54,7 @@ export function initSession(snapshot: SessionSnapshot): SessionUi {
 		queuedPrompts: hydrateQueuedPrompts(snapshot.queuedPrompts),
 		planMode: snapshot.planMode,
 		pendingPlanApproval: snapshot.pendingPlanApproval,
+		external: snapshot.external,
 	};
 	for (const m of snapshot.messages) {
 		ingestMessage(state, m);
@@ -375,6 +376,15 @@ function pushNotice(state: SessionUi, p: Omit<NoticeMsg, "id" | "role" | "timest
 	};
 }
 
+function parseTimestamp(value: unknown): number | undefined {
+	if (typeof value === "number" && !Number.isNaN(value)) return value;
+	if (typeof value === "string") {
+		const parsed = Date.parse(value);
+		if (!Number.isNaN(parsed)) return parsed;
+	}
+	return undefined;
+}
+
 function ingestMessage(state: SessionUi, msg: any): void {
 	if (!msg || typeof msg !== "object") return;
 	switch (msg.role) {
@@ -386,7 +396,7 @@ function ingestMessage(state: SessionUi, msg: any): void {
 				role: "user",
 				text,
 				images: extractImages(msg.content),
-				timestamp: typeof msg.timestamp === "number" ? msg.timestamp : Date.now(),
+				timestamp: parseTimestamp(msg.timestamp) ?? Date.now(),
 				synthetic,
 			});
 			// If this real user message corresponds to a previously-queued prompt
@@ -415,7 +425,7 @@ function ingestMessage(state: SessionUi, msg: any): void {
 				stopReason: typeof msg.stopReason === "string" ? msg.stopReason : undefined,
 				isStreaming: false,
 				errorMessage: typeof msg.errorMessage === "string" ? msg.errorMessage : undefined,
-				timestamp: typeof msg.timestamp === "number" ? msg.timestamp : undefined,
+				timestamp: parseTimestamp(msg.timestamp),
 				durationMs: typeof msg.duration === "number" ? msg.duration : undefined,
 				ttft: typeof msg.ttft === "number" ? msg.ttft : undefined,
 			});
@@ -505,7 +515,7 @@ function finalizeMessage(state: SessionUi, msg: any): SessionUi {
 				usage: extractUsage(msg.usage) ?? m.usage,
 				stopReason: typeof msg.stopReason === "string" ? msg.stopReason : m.stopReason,
 				errorMessage: typeof msg.errorMessage === "string" ? msg.errorMessage : m.errorMessage,
-				timestamp: typeof msg.timestamp === "number" ? msg.timestamp : m.timestamp,
+				timestamp: parseTimestamp(msg.timestamp) ?? m.timestamp,
 				durationMs: typeof msg.duration === "number" ? msg.duration : m.durationMs,
 				ttft: typeof msg.ttft === "number" ? msg.ttft : m.ttft,
 			};

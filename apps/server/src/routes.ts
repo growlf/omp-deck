@@ -13,7 +13,9 @@ import type { Config } from "./config.ts";
 import { logger } from "./log.ts";
 import { getBuildInfo, getUptimeSecs } from "./build-info.ts";
 import { getUpdateCheck } from "./update-check.ts";
-import type { AgentBridge } from "./bridge/types.ts";
+import type { AgentBridge, SessionHandle } from "./bridge/types.ts";
+import fs from "node:fs";
+import { archiveSessionFile, isRecentlyModified, rewriteSessionTitle } from "./jsonl-tailer.ts";
 
 const log = logger("routes");
 
@@ -38,6 +40,31 @@ import type { BridgeSupervisor } from "./bridge-supervisor.ts";
 import type { MarketplaceService } from "./marketplace-service.ts";
 import type { SkillsService } from "./skills-service.ts";
 import type { KbService } from "./kb-service.ts";
+
+const LIVE_WRITER_WINDOW_MS = 120_000;
+
+function liveWriterGuardError(filePath: string): string | undefined {
+	if (isRecentlyModified(filePath, LIVE_WRITER_WINDOW_MS)) {
+		return "session updated within the last 2 minutes — external process may still be writing; stop it first";
+	}
+	return undefined;
+}
+
+async function resolveSessionFile(
+	bridge: AgentBridge,
+	id: string,
+): Promise<{ filePath?: string; handle: SessionHandle | undefined }> {
+	const handle = bridge.getSession(id);
+	if (handle?.sessionFile) return { filePath: handle.sessionFile, handle };
+	try {
+		const sessions = await bridge.listSessions({});
+		const summary = sessions.find((s) => s.id === id);
+		if (summary?.path) return { filePath: summary.path, handle: undefined };
+	} catch {
+		// listSessions is best-effort — fall through.
+	}
+	return { filePath: undefined, handle: undefined };
+}
 
 export function buildRouter(
 	bridge: AgentBridge,
@@ -122,7 +149,10 @@ export function buildRouter(
 
 		try {
 			const handle = body.resumeFromPath
-				? await bridge.resumeSession({ sessionPath: body.resumeFromPath })
+				? await bridge.resumeSession({
+						sessionPath: body.resumeFromPath,
+						...(body.external ? { external: true } : {}),
+					})
 				: await bridge.createSession({
 						cwd,
 						...(body.model ? { model: body.model } : {}),
@@ -144,6 +174,7 @@ export function buildRouter(
 		const id = c.req.param("id");
 		const handle = bridge.getSession(id);
 		if (!handle) return c.json({ error: "session not found" }, 404);
+		if (handle.isResumed) return c.json({ error: "session owned by an external omp process — read-only" }, 409);
 		try {
 			await handle.abort();
 			return c.json({ ok: true });
@@ -157,6 +188,7 @@ export function buildRouter(
 		const id = c.req.param("id");
 		const handle = bridge.getSession(id);
 		if (!handle) return c.json({ error: "session not found" }, 404);
+		if (handle.isResumed) return c.json({ error: "session owned by an external omp process — read-only" }, 409);
 		// Body is optional — accept missing/empty JSON without bouncing.
 		let body: { focus?: string } = {};
 		try {
@@ -186,9 +218,26 @@ export function buildRouter(
 		}
 		try {
 			if (typeof body.name === "string") {
-				await handle.setName(body.name.trim());
+				const trimmed = body.name.trim();
+				if (handle.isResumed) {
+					const filePath = handle.sessionFile;
+					if (!filePath) return c.json({ error: "session file not found" }, 404);
+					const guard = liveWriterGuardError(filePath);
+					if (guard) return c.json({ error: guard }, 409);
+					try {
+						rewriteSessionTitle(filePath, trimmed);
+					} catch (err) {
+						return c.json({ error: String(err) }, 500);
+					}
+					handle.emitSessionUpdated();
+				} else {
+					await handle.setName(trimmed);
+				}
 			}
 			if (body.model && typeof body.model === "object") {
+				if (handle.isResumed) {
+					return c.json({ error: "session is read-only (owned by an external omp process)" }, 409);
+				}
 				const provider = typeof body.model.provider === "string" ? body.model.provider : "";
 				const modelId = typeof body.model.id === "string" ? body.model.id : "";
 				if (!provider || !modelId) {
@@ -223,15 +272,40 @@ export function buildRouter(
 
 	app.delete("/sessions/:id", async (c) => {
 		const id = c.req.param("id");
-		const handle = bridge.getSession(id);
-		if (!handle) return c.json({ error: "session not found" }, 404);
+		const { filePath, handle } = await resolveSessionFile(bridge, id);
+		if (!handle && !filePath) return c.json({ error: "session not found" }, 404);
+		if (handle?.isResumed && filePath) {
+			const guard = liveWriterGuardError(filePath);
+			if (guard) return c.json({ error: guard }, 409);
+		}
 		try {
-			await handle.dispose();
-			return c.json({ ok: true });
+			if (handle) await handle.dispose();
 		} catch (err) {
 			log.error(`dispose failed`, err);
 			return c.json({ error: String(err) }, 500);
 		}
+		return c.json({ ok: true });
+	});
+
+	app.post("/sessions/:id/archive", async (c) => {
+		const id = c.req.param("id");
+		const { filePath, handle } = await resolveSessionFile(bridge, id);
+		if (!filePath) return c.json({ error: "session not found" }, 404);
+		if (!fs.existsSync(filePath)) {
+			return c.json({ error: "session file not found" }, 404);
+		}
+		const guard = liveWriterGuardError(filePath);
+		if (guard) return c.json({ error: guard }, 409);
+		const result = archiveSessionFile(filePath);
+		if (result.error) return c.json({ error: result.error }, 500);
+		if (handle) {
+			try {
+				await handle.dispose();
+			} catch (err) {
+				log.error(`dispose after archive failed`, err);
+			}
+		}
+		return c.json({ archivedTo: result.archivedTo });
 	});
 
 	app.route("/", buildTasksRouter());

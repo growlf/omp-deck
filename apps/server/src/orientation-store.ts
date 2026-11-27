@@ -24,6 +24,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { getDataDir, readManagedEnvFile } from "./env-store.ts";
+import { resolveHome } from "./resolve-home.ts";
 
 /**
  * System-prompt block prepended to every omp session created or resumed via
@@ -41,7 +42,7 @@ You are running inside an omp-deck session. omp-deck is a local web UI for
 the omp coding agent that also exposes a kanban, cron scheduler, and inbox
 over HTTP on the loopback interface.
 
-Local API base: http://127.0.0.1:8787/api  (use the \`bash\` tool with \`curl\`).
+Local API base: http://127.0.0.1:8788/api  (use the \`bash\` tool with \`curl\`).
 
 ## Knowledge base
 A local llm-wiki at \`~/kb/\` is the deck's long-form memory; the cockpit's \`/kb\` view consumes it. The canonical orientation reads (\`working-voice\`, \`deck-orientation\`, \`projects-hub\`, \`org-system-hub\` — all under \`kb://system/\`) are wired into the \`/start\` slash command and fire on session boot. Re-read any of them directly when you need to re-anchor mid-session.
@@ -129,7 +130,10 @@ export function getEffectivePrelude(): string {
 // ─── /start command ────────────────────────────────────────────────────────
 
 export function getStartCommandPath(): string {
-	return path.join(os.homedir(), ".omp", "agent", "commands", "start.md");
+	// Honor the same env the tests override (see resolve-home.ts): keeps the
+	// /start command out of the real home when a sandbox is set.
+	const home = resolveHome();
+	return path.join(home, ".omp", "agent", "commands", "start.md");
 }
 
 export interface StartCommand {

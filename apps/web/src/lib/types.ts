@@ -248,4 +248,6 @@ export interface SessionUi {
 	 */
 	planMode?: PlanModeContextWire;
 	pendingPlanApproval?: PendingPlanApprovalWire;
+	/** True iff this session is tailer-backed (resumed from an external omp process). */
+	external?: boolean;
 }
