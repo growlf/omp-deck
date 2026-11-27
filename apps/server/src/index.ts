@@ -104,7 +104,10 @@ async function main(): Promise<void> {
 	routinesRunner.start();
 	let server: Server<ConnectionData>;
 	const supervisor = buildDefaultBridgeSupervisor();
-	void supervisor.autoStart().catch((err) => { log.error("bridge auto-start failed", err); });
+	// Capture the promise so safeShutdown can await it before shutting the
+	// supervisor down — otherwise a slow autoStart could spawn a bridge after
+	// shutdown has begun and leave it untracked (a leaked process).
+	const autoStartDone = supervisor.autoStart().catch((err) => { log.error("bridge auto-start failed", err); });
 	const marketplaceService = new MarketplaceService();
 	const skillsService = new SkillsService(config, marketplaceService);
 	const kbService = new KbService({ root: resolveKbRoot() });
@@ -208,6 +211,11 @@ async function main(): Promise<void> {
 			kbWatcherDispose();
 		} catch (err) {
 			log.error(`kb watcher dispose threw`, err);
+		}
+		try {
+			await autoStartDone; // settle in-flight auto-start before stopping
+		} catch {
+			// autoStartDone never rejects (it carries its own catch).
 		}
 		try {
 			await supervisor.shutdown();

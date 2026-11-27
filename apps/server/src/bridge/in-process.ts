@@ -37,7 +37,7 @@ import type {
 
 import path from "node:path";
 import { statSync } from "node:fs";
-import { readJsonlEntries, readJsonlHeader, tailJsonl } from "../jsonl-tailer.ts";
+import { isRecentlyModified, readJsonlEntries, readJsonlHeader, tailJsonl } from "../jsonl-tailer.ts";
 
 import { logger } from "../log.ts";
 import { getDeckModelRegistry } from "../auth-singleton.ts";
@@ -161,7 +161,16 @@ export class InProcessAgentBridge implements AgentBridge {
 		}
 		const sessionId = header.id ?? path.basename(filePath, ".jsonl");
 		const existing = this.active.get(sessionId);
+		if (existing?.handle.isResumed) {
+			if (opts.external === true) return existing.handle; // already live-tailed — no-op resume
+			throw new Error(`session ${sessionId} is already tailed as an external read-only session — stop the external process or resume with external: true`);
+		}
 		if (existing) await existing.handle.dispose();
+		if (opts.external !== true && isRecentlyModified(filePath)) {
+			throw new Error(
+				`session file was modified within the last 2 minutes — it may be owned by an external process; resume with external: true (read-only)`,
+			);
+		}
 		if (opts.external === true) {
 			const cwd = header.cwd ?? process.cwd();
 			const handle = new TailerSessionHandle({

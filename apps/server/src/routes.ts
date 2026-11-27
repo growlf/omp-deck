@@ -16,6 +16,8 @@ import { getUpdateCheck } from "./update-check.ts";
 import type { AgentBridge, SessionHandle } from "./bridge/types.ts";
 import fs from "node:fs";
 import { archiveSessionFile, isRecentlyModified, rewriteSessionTitle } from "./jsonl-tailer.ts";
+import { isLoopbackRequest } from "./routes-settings.ts";
+import path from "node:path";
 
 const log = logger("routes");
 
@@ -272,22 +274,25 @@ export function buildRouter(
 
 	app.delete("/sessions/:id", async (c) => {
 		const id = c.req.param("id");
-		const { filePath, handle } = await resolveSessionFile(bridge, id);
-		if (!handle && !filePath) return c.json({ error: "session not found" }, 404);
-		if (handle?.isResumed && filePath) {
+		const handle = bridge.getSession(id);
+		if (!handle) return c.json({ error: "session not found" }, 404);
+		if (handle.isResumed) {
+			const filePath = handle.sessionFile;
+			if (!filePath) return c.json({ error: "session file not found" }, 404);
 			const guard = liveWriterGuardError(filePath);
 			if (guard) return c.json({ error: guard }, 409);
 		}
 		try {
-			if (handle) await handle.dispose();
+			await handle.dispose();
 		} catch (err) {
 			log.error(`dispose failed`, err);
-			return c.json({ error: String(err) }, 500);
+			return c.json({ error: "failed to dispose session" }, 500);
 		}
 		return c.json({ ok: true });
 	});
 
 	app.post("/sessions/:id/archive", async (c) => {
+		if (!isLoopbackRequest(c.req.raw)) return c.json({ error: "archive requires loopback" }, 403);
 		const id = c.req.param("id");
 		const { filePath, handle } = await resolveSessionFile(bridge, id);
 		if (!filePath) return c.json({ error: "session not found" }, 404);
@@ -297,7 +302,10 @@ export function buildRouter(
 		const guard = liveWriterGuardError(filePath);
 		if (guard) return c.json({ error: guard }, 409);
 		const result = archiveSessionFile(filePath);
-		if (result.error) return c.json({ error: result.error }, 500);
+		if (result.error || !result.archivedTo) {
+			log.error(`archive failed for session ${id}`, result.error);
+			return c.json({ error: "failed to archive session — see server logs" }, 500);
+		}
 		if (handle) {
 			try {
 				await handle.dispose();
@@ -305,7 +313,7 @@ export function buildRouter(
 				log.error(`dispose after archive failed`, err);
 			}
 		}
-		return c.json({ archivedTo: result.archivedTo });
+		return c.json({ archivedTo: path.basename(result.archivedTo) });
 	});
 
 	app.route("/", buildTasksRouter());
